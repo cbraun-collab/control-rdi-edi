@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Control RDI / EDI · Senercom</title>
+<meta name="theme-color" content="#003B49" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal:#003B49;
+    --teal-light:#0F5C6E;
+    --orange:#CF4520;
+    --orange-light:#E8623B;
+    --cream:#F4F1EA;
+    --ink:#14201F;
+    --ink-soft:#4C5A58;
+    --line:#DAD5C8;
+    --white:#FFFFFF;
+    --radius:10px;
+    --font-display:'Space Grotesk', sans-serif;
+    --font-mono:'JetBrains Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--cream); color:var(--ink); font-family:var(--font-display); -webkit-font-smoothing:antialiased;}
+  #app{min-height:100vh; display:flex; flex-direction:column;}
+
+  /* --- Pantalla de acceso --- */
+  #gate{flex:1; display:flex; align-items:center; justify-content:center; padding:24px;}
+  .gate-card{background:var(--white); border:1px solid var(--line); border-radius:16px; padding:40px 36px; max-width:380px; width:100%; text-align:center;}
+  .gate-card img{width:120px; margin-bottom:20px;}
+  .gate-card h1{font-size:19px; font-weight:600; margin:0 0 6px;}
+  .gate-card p{font-size:13.5px; color:var(--ink-soft); margin:0 0 22px; line-height:1.5;}
+  .gate-card input{width:100%; padding:12px 14px; border:1px solid var(--line); border-radius:8px; font-size:15px; font-family:var(--font-mono); margin-bottom:14px;}
+  .gate-card input:focus{outline:none; border-color:var(--teal);}
+  .gate-card button, .btn-primary{width:100%; padding:12px 14px; border:none; border-radius:8px; background:var(--orange); color:var(--white); font-family:var(--font-display); font-weight:600; font-size:15px; cursor:pointer; transition:background .15s;}
+  .gate-card button:hover, .btn-primary:hover{background:var(--orange-light);}
+  .gate-error{color:var(--orange); font-size:12.5px; margin:-6px 0 14px; display:none;}
+
+  /* --- App principal --- */
+  #main{display:none; flex:1; flex-direction:column;}
+  header.topbar{background:var(--teal); color:var(--white); padding:14px 20px; display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:10;}
+  header.topbar img{height:32px;}
+  header.topbar .titles{display:flex; flex-direction:column; line-height:1.25;}
+  header.topbar .titles strong{font-size:15px; font-weight:600;}
+  header.topbar .titles span{font-size:11.5px; color:#9FE1CB; font-family:var(--font-mono);}
+
+  nav.tabs{display:flex; background:var(--white); border-bottom:1px solid var(--line); overflow-x:auto;}
+  nav.tabs button{flex:1; min-width:110px; padding:14px 10px; border:none; background:none; font-family:var(--font-display); font-size:13.5px; font-weight:500; color:var(--ink-soft); cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap;}
+  nav.tabs button.active{color:var(--teal); border-bottom-color:var(--orange);}
+
+  main.content{flex:1; padding:20px; max-width:720px; margin:0 auto; width:100%;}
+  .view{display:none;}
+  .view.active{display:block;}
+
+  .empty-state{background:var(--white); border:1px dashed var(--line); border-radius:14px; padding:36px 24px; text-align:center; color:var(--ink-soft);}
+  .empty-state strong{display:block; color:var(--ink); font-size:15px; margin-bottom:6px; font-weight:600;}
+  .empty-state p{font-size:13.5px; line-height:1.5; margin:0;}
+
+  .fab{position:fixed; right:20px; bottom:24px; width:56px; height:56px; border-radius:50%; background:var(--orange); color:var(--white); border:none; font-size:26px; box-shadow:0 4px 14px rgba(207,69,32,.35); cursor:pointer;}
+
+  .lpdp-note{background:#EFF6F4; border:1px solid #C9E2DB; border-radius:10px; padding:14px 16px; font-size:12px; color:var(--teal); line-height:1.55; margin-top:18px;}
+  .lpdp-note strong{display:block; font-size:12.5px; margin-bottom:4px; font-family:var(--font-mono); letter-spacing:.2px;}
+
+  footer.app-footer{text-align:center; padding:16px; font-size:11px; color:var(--ink-soft); font-family:var(--font-mono);}
+
+  /* --- Formulario --- */
+  .form-view{background:var(--white); border-radius:14px; border:1px solid var(--line); padding:20px;}
+  .form-view h2{font-size:16px; margin:0 0 16px; font-weight:600;}
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:12.5px; font-weight:500; color:var(--ink-soft); margin-bottom:5px;}
+  .field input, .field select, .field textarea{width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-family:var(--font-display); font-size:14px; background:var(--white);}
+  .field textarea{resize:vertical; min-height:70px;}
+  .field-row{display:flex; gap:12px;}
+  .field-row .field{flex:1;}
+  .verify-row{display:flex; gap:8px; align-items:flex-start;}
+  .verify-row .field{flex:1;}
+  .btn-verify{padding:10px 14px; border:1px solid var(--teal); border-radius:8px; background:var(--white); color:var(--teal); font-family:var(--font-display); font-weight:500; font-size:13px; cursor:pointer; white-space:nowrap; margin-top:22px;}
+  .verify-msg{font-size:12px; margin-top:6px; display:none;}
+  .verify-msg.ok{color:#0F6E56; display:block;}
+  .verify-msg.error{color:var(--orange); display:block;}
+  .checks{display:flex; gap:16px; flex-wrap:wrap;}
+  .checks label{display:flex; align-items:center; gap:6px; font-size:13.5px; font-weight:400; color:var(--ink);}
+  .checks input{width:auto;}
+  .file-drop{border:1.5px dashed var(--line); border-radius:10px; padding:16px; text-align:center; font-size:12.5px; color:var(--ink-soft); cursor:pointer;}
+  .file-list{margin-top:8px; display:flex; flex-direction:column; gap:6px;}
+  .file-item{display:flex; justify-content:space-between; align-items:center; background:var(--cream); border-radius:6px; padding:6px 10px; font-size:12px;}
+  .file-item button{border:none; background:none; color:var(--orange); cursor:pointer; font-size:13px;}
+  canvas.firma{width:100%; height:150px; border:1px solid var(--line); border-radius:8px; touch-action:none; background:#fff;}
+  .firma-actions{display:flex; justify-content:flex-end; margin-top:6px;}
+  .firma-actions button{border:none; background:none; color:var(--ink-soft); font-size:12px; cursor:pointer; text-decoration:underline;}
+  .form-actions{display:flex; gap:10px; margin-top:20px;}
+  .btn-secondary{flex:1; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink-soft); font-family:var(--font-display); font-weight:500; font-size:14px; cursor:pointer;}
+  .form-actions .btn-primary{flex:1; margin:0;}
+  .field-error{color:var(--orange); font-size:12px; margin-top:4px; display:none;}
+
+  /* --- Manual --- */
+  .manual-card{background:var(--white); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:14px;}
+  .manual-card h3{font-size:14px; margin:0 0 8px; font-weight:600; color:var(--teal); display:flex; align-items:center; gap:8px;}
+  .manual-card p{font-size:13px; color:var(--ink-soft); line-height:1.6; margin:0 0 8px;}
+  .manual-card a{color:var(--orange); word-break:break-all;}
+  .manual-card code{background:var(--cream); padding:1px 6px; border-radius:4px; font-family:var(--font-mono); font-size:12px;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Pantalla de acceso -->
+  <div id="gate">
+    <div class="gate-card">
+      <img src="logo-senercom.png" alt="Senercom" />
+      <h1>Control de RDI / EDI</h1>
+      <p>Ingresa la clave de acceso entregada por administración para continuar.</p>
+      <input type="password" id="claveInput" placeholder="Clave de acceso" autocomplete="off" />
+      <p class="gate-error" id="gateError">Clave incorrecta, inténtalo de nuevo.</p>
+      <button id="btnEntrar">Entrar</button>
+    </div>
+  </div>
+
+  <!-- App principal -->
+  <div id="main">
+    <header class="topbar">
+      <img src="logo-senercom.png" alt="Senercom" />
+      <div class="titles">
+        <strong>Control RDI / EDI</strong>
+        <span>PWA-COM-005 · REV 0</span>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="active" data-view="bandeja">Bandeja</button>
+      <button data-view="pendientes">Pendientes de firma</button>
+      <button data-view="historial">Historial</button>
+      <button data-view="manual">Manual</button>
+    </nav>
+
+    <main class="content">
+
+      <div class="view" id="view-nuevo">
+        <div class="form-view">
+          <h2>Nuevo RDI / EDI — Sección A (emisor)</h2>
+
+          <div class="field">
+            <label for="f-tipo">Tipo de documento</label>
+            <select id="f-tipo">
+              <option value="RDI">RDI — Requerimiento de información</option>
+              <option value="EDI">EDI — Entrega de información</option>
+            </select>
+          </div>
+
+          <div class="verify-row">
+            <div class="field">
+              <label for="f-codigo">Código de proyecto</label>
+              <input type="text" id="f-codigo" placeholder="Ej: 001-001-O26-CB" />
+            </div>
+            <button class="btn-verify" id="btnVerificar">Verificar</button>
+          </div>
+          <p class="verify-msg" id="verifyMsg"></p>
+
+          <div class="field-row">
+            <div class="field">
+              <label for="f-area">Área</label>
+              <input type="text" id="f-area" placeholder="Ej: Electricidad" />
+            </div>
+            <div class="field">
+              <label for="f-plano">Plano de referencia</label>
+              <input type="text" id="f-plano" placeholder="Ej: Planos eléctricos" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="f-materia">Materia</label>
+            <input type="text" id="f-materia" placeholder="Ej: Cambio de material" />
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label for="f-prioridad">Prioridad</label>
+              <select id="f-prioridad">
+                <option>Alta</option>
+                <option selected>Media</option>
+                <option>Baja</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="f-fecha-req">Fecha requerida de respuesta</label>
+              <input type="date" id="f-fecha-req" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="f-descripcion">Descripción</label>
+            <textarea id="f-descripcion" placeholder="Detalla el requerimiento o la información que se entrega"></textarea>
+          </div>
+
+          <div class="field">
+            <label>Incidencia</label>
+            <div class="checks">
+              <label><input type="checkbox" value="Costo" class="chk-incidencia" /> Costo</label>
+              <label><input type="checkbox" value="Plazo" class="chk-incidencia" /> Plazo</label>
+              <label><input type="checkbox" value="Otros" class="chk-incidencia" /> Otros</label>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Antecedentes adjuntos (cualquier tipo: PDF, DWG, Word, Excel, JPG, etc.)</label>
+            <div class="file-drop" id="fileDrop">Toca aquí para adjuntar archivos</div>
+            <input type="file" id="f-archivos" multiple style="display:none;" />
+            <div class="file-list" id="fileList"></div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label for="f-emisor-nombre">Nombre emisor</label>
+              <input type="text" id="f-emisor-nombre" />
+            </div>
+            <div class="field">
+              <label for="f-emisor-cargo">Cargo</label>
+              <input type="text" id="f-emisor-cargo" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Firma del emisor</label>
+            <canvas class="firma" id="firmaCanvas"></canvas>
+            <div class="firma-actions"><button id="btnLimpiarFirma">Limpiar firma</button></div>
+          </div>
+
+          <p class="field-error" id="formError"></p>
+
+          <div class="form-actions">
+            <button class="btn-secondary" id="btnCancelarNuevo">Cancelar</button>
+            <button class="btn-primary" id="btnGuardarNuevo">Guardar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="view active" id="view-bandeja">
+        <div class="empty-state">
+          <strong>Aún no hay RDI ni EDI creados</strong>
+          <p>Usa el botón "+" para levantar un nuevo requerimiento o entrega de información.</p>
+        </div>
+        <div class="lpdp-note">
+          <strong>Nota — Ley 21.719 de Protección de Datos Personales</strong>
+          Los datos de contacto (nombre, RUT, cargo, firma) ingresados en esta aplicación se utilizan exclusivamente para dejar trazabilidad de los requerimientos y entregas de información entre Senercom y sus mandantes o clientes, y no serán compartidos con terceros ajenos al proyecto.
+        </div>
+      </div>
+
+      <div class="view" id="view-pendientes">
+        <div class="empty-state">
+          <strong>Sin RDI/EDI pendientes de firma</strong>
+          <p>Aquí aparecerán los documentos enviados que esperan la firma del receptor.</p>
+        </div>
+      </div>
+
+      <div class="view" id="view-historial">
+        <div class="empty-state">
+          <strong>Historial vacío</strong>
+          <p>Los RDI/EDI cerrados (firmados por ambas partes) quedarán listados aquí.</p>
+        </div>
+      </div>
+
+      <div class="view" id="view-manual">
+        <div class="manual-card">
+          <h3>Google Sheet maestro</h3>
+          <p>Aquí quedan registrados TODOS los RDI y EDI (uno por fila), su estado, correlativo y los datos de la Sección A, B y C.</p>
+          <p><strong>Ubicación:</strong> Carpeta de obras → carpeta <code>PWA - Control RDI-EDI (Backend)</code> → hoja <code>Control RDI-EDI SENERCOM</code></p>
+          <p><a href="https://drive.google.com/drive/folders/1_udVkFwPxWs1H8YYCSzNaiJoKYlhXCmQ" target="_blank" rel="noopener">Abrir carpeta en Drive</a></p>
+          <p><a href="https://docs.google.com/spreadsheets/d/17ocfHCDBRq9Lps1sdlNOQG2Y7jjjJp5W1ORKM7ERUMw/edit" target="_blank" rel="noopener">Abrir Sheet directamente</a></p>
+        </div>
+
+        <div class="manual-card">
+          <h3>Backend (Apps Script)</h3>
+          <p>El código que procesa cada RDI/EDI (correlativos, búsqueda de carpeta de obra, guardado) vive vinculado a ese mismo Sheet, desplegado desde la cuenta <code>carlos.braun@gmail.com</code> (no cbraun@senercom.cl, para evitar problemas de permisos entre cuentas).</p>
+          <p>Para editarlo: abre el Sheet → menú <code>Extensiones → Apps Script</code>.</p>
+        </div>
+
+        <div class="manual-card">
+          <h3>Archivos adjuntos y PDF final de cada RDI/EDI</h3>
+          <p>Los antecedentes que se adjuntan y el PDF final firmado se guardan automáticamente dentro de la carpeta de la obra correspondiente, en la subcarpeta <code>03 - RDI EDI</code>.</p>
+          <p>Esa carpeta se ubica según el código de proyecto ingresado, dentro de la carpeta del año correspondiente en:</p>
+          <p><a href="https://drive.google.com/drive/folders/1Lm2X3Uz_H_sUkD7Zll0JjKPSdaa1EW9n" target="_blank" rel="noopener">Carpeta raíz de obras</a></p>
+        </div>
+
+        <div class="manual-card">
+          <h3>Clave de acceso a la app</h3>
+          <p>La clave para entrar a esta PWA se valida contra el backend y se administra desde la pestaña <code>CONFIG</code> del Sheet maestro.</p>
+        </div>
+      </div>
+    </main>
+
+    <button class="fab" id="btnNuevo" title="Nuevo RDI / EDI" aria-label="Nuevo RDI / EDI">+</button>
+
+    <footer class="app-footer">Constructora e Ingeniería Senercom Ltda. · PWA-COM-005 REV 0 · 01-09-2026</footer>
+  </div>
+
+</div>
+
+<script>
+  // --- Clave de acceso de la app (placeholder, se reemplaza por CLAVE_APP real del backend) ---
+  const CLAVE_APP_TEMP = 'senercom2026';
+
+  const gate = document.getElementById('gate');
+  const main = document.getElementById('main');
+  const claveInput = document.getElementById('claveInput');
+  const gateError = document.getElementById('gateError');
+
+  document.getElementById('btnEntrar').addEventListener('click', intentarEntrar);
+  claveInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') intentarEntrar(); });
+
+  function intentarEntrar(){
+    if (claveInput.value.trim() === CLAVE_APP_TEMP){
+      gate.style.display = 'none';
+      main.style.display = 'flex';
+      sessionStorage.setItem('rdiedi_ok', '1');
+    } else {
+      gateError.style.display = 'block';
+    }
+  }
+
+  if (sessionStorage.getItem('rdiedi_ok') === '1'){
+    gate.style.display = 'none';
+    main.style.display = 'flex';
+  }
+
+  // --- Navegación por pestañas ---
+  document.querySelectorAll('nav.tabs button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('view-' + btn.dataset.view).classList.add('active');
+    });
+  });
+
+  // --- Backend: URL del Web App de Apps Script (se completa al desplegar el backend) ---
+  const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbz4hyITcxdEi-nzjuXYMFk-5ZzXq-jHYIjtagOq1_JzJpUY8DbwQnla6lxt-w2NXuwOkQ/exec';
+  const CLAVE_APP = 'senercom2026';
+
+  function llamarBackendGet(params){
+    return new Promise((resolve, reject) => {
+      if (!BACKEND_URL){ reject(new Error('BACKEND_URL no configurado todavía')); return; }
+      const cbName = 'cb_' + Date.now();
+      window[cbName] = (data) => { resolve(data); delete window[cbName]; script.remove(); };
+      const query = new URLSearchParams({ ...params, clave: CLAVE_APP, callback: cbName }).toString();
+      const script = document.createElement('script');
+      script.src = BACKEND_URL + '?' + query;
+      script.onerror = () => reject(new Error('Error de conexión con el backend'));
+      document.body.appendChild(script);
+    });
+  }
+
+  async function llamarBackendPost(body){
+    if (!BACKEND_URL) throw new Error('BACKEND_URL no configurado todavía');
+    const res = await fetch(BACKEND_URL, {
+      method: 'POST',
+      body: JSON.stringify({ ...body, clave: CLAVE_APP })
+    });
+    return res.json();
+  }
+
+  // --- Navegación al formulario "Nuevo" ---
+  function mostrarNuevo(){
+    document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+    document.getElementById('view-nuevo').classList.add('active');
+  }
+  function cerrarNuevo(){
+    document.getElementById('view-nuevo').classList.remove('active');
+    document.querySelector('nav.tabs button[data-view="bandeja"]').classList.add('active');
+    document.getElementById('view-bandeja').classList.add('active');
+  }
+
+  document.getElementById('btnNuevo').addEventListener('click', mostrarNuevo);
+  document.getElementById('btnCancelarNuevo').addEventListener('click', () => {
+    if (confirm('¿Descartar este RDI/EDI sin guardar?')) cerrarNuevo();
+  });
+
+  // --- Verificar proyecto ---
+  let carpetaVerificada = null;
+  document.getElementById('btnVerificar').addEventListener('click', async () => {
+    const codigo = document.getElementById('f-codigo').value.trim();
+    const msg = document.getElementById('verifyMsg');
+    if (!codigo){ msg.textContent = 'Ingresa un código de proyecto.'; msg.className = 'verify-msg error'; return; }
+    msg.textContent = 'Verificando...'; msg.className = 'verify-msg';
+    try {
+      const data = await llamarBackendGet({ accion: 'verificarProyecto', codigoProyecto: codigo });
+      if (data.ok && data.existe){
+        carpetaVerificada = data.carpetaId;
+        msg.textContent = 'Proyecto encontrado. Carpeta "03 - RDI EDI" lista para guardar.';
+        msg.className = 'verify-msg ok';
+      } else {
+        carpetaVerificada = null;
+        msg.textContent = 'No se encontró la carpeta de ese proyecto. Revisa el código.';
+        msg.className = 'verify-msg error';
+      }
+    } catch(err){
+      msg.textContent = 'No se pudo conectar con el backend todavía (falta desplegarlo).';
+      msg.className = 'verify-msg error';
+    }
+  });
+
+  // --- Adjuntos (por ahora solo se listan en memoria; la subida a Drive se conecta con el flujo de envío) ---
+  const archivosSeleccionados = [];
+  document.getElementById('fileDrop').addEventListener('click', () => document.getElementById('f-archivos').click());
+  document.getElementById('f-archivos').addEventListener('change', (e) => {
+    Array.from(e.target.files).forEach((f) => archivosSeleccionados.push(f));
+    renderFileList();
+  });
+  function renderFileList(){
+    const list = document.getElementById('fileList');
+    list.innerHTML = '';
+    archivosSeleccionados.forEach((f, i) => {
+      const div = document.createElement('div');
+      div.className = 'file-item';
+      div.innerHTML = '<span>' + f.name + '</span>';
+      const btn = document.createElement('button');
+      btn.textContent = 'Quitar';
+      btn.addEventListener('click', () => { archivosSeleccionados.splice(i, 1); renderFileList(); });
+      div.appendChild(btn);
+      list.appendChild(div);
+    });
+  }
+
+  // --- Firma en canvas (fondo blanco antes de toDataURL, lección ya conocida) ---
+  const canvas = document.getElementById('firmaCanvas');
+  const ctx = canvas.getContext('2d');
+  function ajustarCanvas(){
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#14201F';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+  }
+  window.addEventListener('resize', ajustarCanvas);
+  setTimeout(ajustarCanvas, 50);
+
+  let dibujando = false;
+  function posicion(e){
+    const rect = canvas.getBoundingClientRect();
+    const punto = e.touches ? e.touches[0] : e;
+    return { x: punto.clientX - rect.left, y: punto.clientY - rect.top };
+  }
+  function iniciarTrazo(e){ dibujando = true; const p = posicion(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }
+  function trazar(e){ if (!dibujando) return; const p = posicion(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }
+  function terminarTrazo(){ dibujando = false; }
+  canvas.addEventListener('mousedown', iniciarTrazo);
+  canvas.addEventListener('mousemove', trazar);
+  canvas.addEventListener('mouseup', terminarTrazo);
+  canvas.addEventListener('mouseleave', terminarTrazo);
+  canvas.addEventListener('touchstart', iniciarTrazo);
+  canvas.addEventListener('touchmove', trazar);
+  canvas.addEventListener('touchend', terminarTrazo);
+
+  document.getElementById('btnLimpiarFirma').addEventListener('click', ajustarCanvas);
+
+  // --- Guardar Sección A ---
+  document.getElementById('btnGuardarNuevo').addEventListener('click', async () => {
+    const errorEl = document.getElementById('formError');
+    errorEl.style.display = 'none';
+
+    const codigo = document.getElementById('f-codigo').value.trim();
+    const emisorNombre = document.getElementById('f-emisor-nombre').value.trim();
+
+    if (!codigo || !carpetaVerificada){
+      errorEl.textContent = 'Verifica el código de proyecto antes de guardar.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if (!emisorNombre){
+      errorEl.textContent = 'Ingresa el nombre del emisor.';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    const incidencias = Array.from(document.querySelectorAll('.chk-incidencia:checked')).map((c) => c.value);
+    const firmaDataUrl = canvas.toDataURL('image/png');
+
+    const body = {
+      accion: 'guardarSeccionA',
+      tipo: document.getElementById('f-tipo').value,
+      codigoProyecto: codigo,
+      area: document.getElementById('f-area').value.trim(),
+      planoReferencia: document.getElementById('f-plano').value.trim(),
+      materia: document.getElementById('f-materia').value.trim(),
+      prioridad: document.getElementById('f-prioridad').value,
+      fechaRequerida: document.getElementById('f-fecha-req').value,
+      descripcion: document.getElementById('f-descripcion').value.trim(),
+      incidencia: incidencias.join(', '),
+      emisorNombre: emisorNombre,
+      emisorCargo: document.getElementById('f-emisor-cargo').value.trim(),
+      emisorFecha: new Date().toISOString().slice(0,10),
+      emisorFirmaUrl: '', // la subida de la firma a Drive se conecta en el paso de envío
+      adjuntosEmisor: [] // la subida de adjuntos a Drive se conecta en el paso de envío
+    };
+
+    try {
+      const data = await llamarBackendPost(body);
+      if (data.ok){
+        alert('Guardado como ' + data.numero + '. El envío al receptor se conecta en el próximo paso.');
+        cerrarNuevo();
+      } else {
+        errorEl.textContent = data.error || 'No se pudo guardar.';
+        errorEl.style.display = 'block';
+      }
+    } catch(err){
+      errorEl.textContent = 'No se pudo conectar con el backend todavía (falta desplegarlo como aplicación web).';
+      errorEl.style.display = 'block';
+    }
+  });
+
+  // --- Service worker ---
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('service-worker.js');
+    });
+  }
+</script>
+</body>
+</html>

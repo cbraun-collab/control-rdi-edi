@@ -390,7 +390,11 @@
     msg.textContent = 'Verificando...'; msg.className = 'verify-msg';
     try {
       const data = await llamarBackendGet({ accion: 'verificarProyecto', codigoProyecto: codigo });
-      if (data.ok && data.existe){
+      if (data.duplicado){
+        carpetaVerificada = null;
+        msg.innerHTML = 'El código está duplicado en más de una carpeta, revisa antes de continuar:<br>' + data.ubicaciones.map((u) => '• ' + u).join('<br>');
+        msg.className = 'verify-msg error';
+      } else if (data.ok && data.existe){
         carpetaVerificada = data.carpetaId;
         msg.textContent = 'Proyecto encontrado. Carpeta "03 - RDI EDI" lista para guardar.';
         msg.className = 'verify-msg ok';

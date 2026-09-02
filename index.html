@@ -105,6 +105,13 @@
   .manual-card p{font-size:13px; color:var(--ink-soft); line-height:1.6; margin:0 0 8px;}
   .manual-card a{color:var(--orange); word-break:break-all;}
   .manual-card code{background:var(--cream); padding:1px 6px; border-radius:4px; font-family:var(--font-mono); font-size:12px;}
+
+  /* --- Pantalla pública de firma remota --- */
+  #firma-publica{display:none; min-height:100vh; background:var(--cream); padding:24px 16px;}
+  .firma-publica-wrap{max-width:520px; margin:0 auto;}
+  .firma-publica-logo{height:44px; display:block; margin:0 auto 20px;}
+  .firma-subtitulo{font-size:13px; color:var(--ink-soft); margin:-8px 0 16px;}
+  #firmaResumenTexto{white-space:pre-line; font-size:13px; color:var(--ink-soft); margin:0;}
 </style>
 </head>
 <body>
@@ -304,11 +311,90 @@
     <footer class="app-footer">Constructora e Ingeniería Senercom Ltda. · PWA-COM-005 REV 0 · 01-09-2026</footer>
   </div>
 
+  <!-- Pantalla pública de firma remota (sin clave, acceso solo por token) -->
+  <div id="firma-publica">
+    <div class="firma-publica-wrap">
+      <img src="logo-senercom.png" alt="Senercom" class="firma-publica-logo" />
+
+      <div id="firmaCargando" class="empty-state">
+        <strong>Cargando documento...</strong>
+        <p>Un momento por favor.</p>
+      </div>
+
+      <div id="firmaError" class="empty-state" style="display:none;">
+        <strong>No se pudo cargar el documento</strong>
+        <p id="firmaErrorTexto">Link inválido o el documento ya no existe.</p>
+      </div>
+
+      <div id="firmaYaFirmado" class="empty-state" style="display:none;">
+        <strong>Este documento ya fue firmado</strong>
+        <p id="firmaYaFirmadoTexto">Gracias, no es necesario hacer nada más.</p>
+      </div>
+
+      <div id="firmaContenido" style="display:none;">
+        <div class="form-view">
+          <h2 id="firmaTitulo">Requerimiento de información</h2>
+          <p class="firma-subtitulo" id="firmaSubtitulo"></p>
+
+          <div class="manual-card" id="firmaResumenA">
+            <h3>Lo que se le envía</h3>
+            <p id="firmaResumenTexto"></p>
+          </div>
+
+          <div class="field">
+            <label for="fp-respuesta">Su respuesta (opcional)</label>
+            <textarea id="fp-respuesta" placeholder="Escriba aquí su respuesta u observaciones"></textarea>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label for="fp-nombre">Nombre</label>
+              <input type="text" id="fp-nombre" />
+            </div>
+            <div class="field">
+              <label for="fp-rut">RUT</label>
+              <input type="text" id="fp-rut" placeholder="12.345.678-9" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="fp-cargo">Cargo</label>
+            <input type="text" id="fp-cargo" />
+          </div>
+
+          <div class="field">
+            <label>Firma</label>
+            <canvas class="firma" id="firmaCanvasPublica"></canvas>
+            <div class="firma-actions"><button id="btnLimpiarFirmaPublica">Limpiar firma</button></div>
+          </div>
+
+          <p class="field-error" id="firmaFormError"></p>
+
+          <div class="lpdp-note">
+            <strong>Nota — Ley 21.719 de Protección de Datos Personales</strong>
+            Sus datos (nombre, RUT, cargo y firma) se utilizan exclusivamente para dejar trazabilidad de este documento entre Senercom y su representada, y no serán compartidos con terceros ajenos al proyecto.
+          </div>
+
+          <div class="form-actions">
+            <button class="btn-primary" id="btnFirmarPublico" style="margin-top:16px;">Firmar y confirmar recepción</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="firmaExito" class="empty-state" style="display:none;">
+        <strong>¡Gracias!</strong>
+        <p>Quedó registrada su firma y respuesta. Ya puede cerrar esta ventana.</p>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
   // --- Clave de acceso de la app (placeholder, se reemplaza por CLAVE_APP real del backend) ---
   const CLAVE_APP_TEMP = 'senercom2026';
+
+  const tokenFirma = new URLSearchParams(location.search).get('firmar');
 
   const gate = document.getElementById('gate');
   const main = document.getElementById('main');
@@ -328,7 +414,12 @@
     }
   }
 
-  if (sessionStorage.getItem('rdiedi_ok') === '1'){
+  if (tokenFirma){
+    // Link de firma remota: se salta por completo la clave de acceso interna.
+    gate.style.display = 'none';
+    document.getElementById('firma-publica').style.display = 'block';
+    inicializarFirmaPublica(tokenFirma);
+  } else if (sessionStorage.getItem('rdiedi_ok') === '1'){
     gate.style.display = 'none';
     main.style.display = 'flex';
   }
@@ -549,6 +640,129 @@
       btnGuardar.textContent = textoOriginal;
     }
   });
+
+  // --- Pantalla pública de firma remota (Sección B del receptor) ---
+  function inicializarFirmaPublica(token){
+    const elCargando = document.getElementById('firmaCargando');
+    const elError = document.getElementById('firmaError');
+    const elYaFirmado = document.getElementById('firmaYaFirmado');
+    const elContenido = document.getElementById('firmaContenido');
+    const elExito = document.getElementById('firmaExito');
+
+    function mostrarSolo(el){
+      [elCargando, elError, elYaFirmado, elContenido, elExito].forEach((e) => e.style.display = 'none');
+      el.style.display = 'block';
+    }
+
+    llamarBackendGet({ accion: 'obtenerRegistroPorToken', token: token })
+      .then((data) => {
+        if (!data.ok){
+          document.getElementById('firmaErrorTexto').textContent = data.error || 'Link inválido.';
+          mostrarSolo(elError);
+          return;
+        }
+        if (data.yaFirmado){
+          document.getElementById('firmaYaFirmadoTexto').textContent =
+            'El ' + data.tipo + ' ' + data.numero + ' ya fue firmado anteriormente.';
+          mostrarSolo(elYaFirmado);
+          return;
+        }
+
+        const tipoLargo = data.tipo === 'RDI' ? 'Requerimiento de Información' : 'Entrega de Información';
+        document.getElementById('firmaTitulo').textContent = tipoLargo + ' ' + data.numero;
+        document.getElementById('firmaSubtitulo').textContent = 'Proyecto ' + data.codigoProyecto;
+        document.getElementById('firmaResumenTexto').textContent =
+          'De: ' + (data.emisorNombre || '-') + (data.emisorCargo ? ' (' + data.emisorCargo + ')' : '') + '\n' +
+          (data.area ? 'Área: ' + data.area + '\n' : '') +
+          (data.materia ? 'Materia: ' + data.materia + '\n' : '') +
+          (data.descripcion ? 'Descripción: ' + data.descripcion : '');
+
+        mostrarSolo(elContenido);
+        setTimeout(ajustarCanvasPublica, 50);
+      })
+      .catch(() => {
+        document.getElementById('firmaErrorTexto').textContent = 'No se pudo conectar con el servidor. Intente de nuevo más tarde.';
+        mostrarSolo(elError);
+      });
+
+    // --- Firma en canvas (independiente del canvas del emisor) ---
+    const canvasP = document.getElementById('firmaCanvasPublica');
+    const ctxP = canvasP.getContext('2d');
+    function ajustarCanvasPublica(){
+      const rect = canvasP.getBoundingClientRect();
+      canvasP.width = rect.width;
+      canvasP.height = rect.height;
+      ctxP.fillStyle = '#FFFFFF';
+      ctxP.fillRect(0, 0, canvasP.width, canvasP.height);
+      ctxP.strokeStyle = '#14201F';
+      ctxP.lineWidth = 2;
+      ctxP.lineCap = 'round';
+    }
+    window.addEventListener('resize', ajustarCanvasPublica);
+
+    let dibujandoP = false;
+    function posicionP(e){
+      const rect = canvasP.getBoundingClientRect();
+      const punto = e.touches ? e.touches[0] : e;
+      return { x: punto.clientX - rect.left, y: punto.clientY - rect.top };
+    }
+    function iniciarTrazoP(e){ dibujandoP = true; const p = posicionP(e); ctxP.beginPath(); ctxP.moveTo(p.x, p.y); e.preventDefault(); }
+    function trazarP(e){ if (!dibujandoP) return; const p = posicionP(e); ctxP.lineTo(p.x, p.y); ctxP.stroke(); e.preventDefault(); }
+    function terminarTrazoP(){ dibujandoP = false; }
+    canvasP.addEventListener('mousedown', iniciarTrazoP);
+    canvasP.addEventListener('mousemove', trazarP);
+    canvasP.addEventListener('mouseup', terminarTrazoP);
+    canvasP.addEventListener('mouseleave', terminarTrazoP);
+    canvasP.addEventListener('touchstart', iniciarTrazoP);
+    canvasP.addEventListener('touchmove', trazarP);
+    canvasP.addEventListener('touchend', terminarTrazoP);
+    document.getElementById('btnLimpiarFirmaPublica').addEventListener('click', ajustarCanvasPublica);
+
+    document.getElementById('btnFirmarPublico').addEventListener('click', async () => {
+      const errorEl = document.getElementById('firmaFormError');
+      errorEl.style.display = 'none';
+
+      const nombre = document.getElementById('fp-nombre').value.trim();
+      const rut = document.getElementById('fp-rut').value.trim();
+      if (!nombre || !rut){
+        errorEl.textContent = 'Ingresa tu nombre y RUT antes de firmar.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('btnFirmarPublico');
+      if (btn.disabled) return;
+      btn.disabled = true;
+      const textoOriginal = btn.textContent;
+      btn.textContent = 'Enviando...';
+
+      const body = {
+        accion: 'firmarReceptor',
+        token: token,
+        respuesta: document.getElementById('fp-respuesta').value.trim(),
+        receptorNombre: nombre,
+        receptorRUT: rut,
+        receptorCargo: document.getElementById('fp-cargo').value.trim(),
+        receptorFirmaUrl: canvasP.toDataURL('image/png')
+      };
+
+      try {
+        const data = await llamarBackendPost(body);
+        if (data.ok){
+          mostrarSolo(elExito);
+        } else {
+          errorEl.textContent = data.error || 'No se pudo registrar la firma.';
+          errorEl.style.display = 'block';
+        }
+      } catch(err){
+        errorEl.textContent = 'No se pudo conectar con el servidor. Intente de nuevo.';
+        errorEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      }
+    });
+  }
 
   // --- Service worker ---
   if ('serviceWorker' in navigator) {

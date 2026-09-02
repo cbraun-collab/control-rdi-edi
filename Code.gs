@@ -12,6 +12,7 @@ const SHEET_ID = '17ocfHCDBRq9Lps1sdlNOQG2Y7jjjJp5W1ORKM7ERUMw';
 const CARPETA_RAIZ_OBRAS_ID = '1Lm2X3Uz_H_sUkD7Zll0JjKPSdaa1EW9n'; // carpeta raíz que contiene las carpetas por año
 const CLAVE_APP = 'senercom2026'; // TODO: reemplazar por la clave definitiva antes de liberar la app
 const NOMBRE_SUBCARPETA_RDI_EDI = '03 - RDI EDI';
+const PWA_URL = 'https://cbraun-collab.github.io/control-rdi-edi/';
 
 // ==================== INICIALIZACIÓN (ejecutar una sola vez, a mano, desde el editor) ====================
 function inicializarEstructura() {
@@ -53,6 +54,22 @@ function crearHojaSiNoExiste_(ss, nombre, headers) {
   if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
+  }
+}
+
+/**
+ * Agrega la columna "Receptor_Email" al final de REGISTROS si todavía no existe.
+ * Ejecutar UNA SOLA VEZ a mano desde el editor antes de usar el envío por correo.
+ */
+function migrarColumnaReceptorEmail() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('REGISTROS');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headers.indexOf('Receptor_Email') === -1) {
+    sheet.getRange(1, sheet.getLastColumn() + 1).setValue('Receptor_Email');
+    Logger.log('Columna Receptor_Email agregada.');
+  } else {
+    Logger.log('La columna Receptor_Email ya existía, no se hizo nada.');
   }
 }
 
@@ -193,7 +210,10 @@ function doGet(e) {
   let resultado;
 
   try {
-    if (e.parameter.clave !== CLAVE_APP) {
+    if (accion === 'obtenerRegistroPorToken') {
+      // Endpoint público: el receptor externo no tiene la CLAVE_APP, el token es el secreto.
+      resultado = obtenerRegistroPorToken_(e.parameter.token);
+    } else if (e.parameter.clave !== CLAVE_APP) {
       resultado = { ok: false, error: 'Clave de acceso inválida' };
     } else if (accion === 'verificarProyecto') {
       const busqueda = buscarCarpetaRdiEdi_(e.parameter.codigoProyecto);
@@ -220,7 +240,10 @@ function doPost(e) {
   let resultado;
 
   try {
-    if (body.clave !== CLAVE_APP) {
+    if (body.accion === 'firmarReceptor') {
+      // Endpoint público: el receptor externo no tiene la CLAVE_APP, el token es el secreto.
+      resultado = firmarReceptor_(body);
+    } else if (body.clave !== CLAVE_APP) {
       resultado = { ok: false, error: 'Clave de acceso inválida' };
     } else if (body.accion === 'crearRegistroBase') {
       resultado = crearRegistroBase_(body);
@@ -235,6 +258,79 @@ function doPost(e) {
 
   return ContentService.createTextOutput(JSON.stringify(resultado))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Busca la fila en REGISTROS cuyo Token_Firma coincide. Devuelve la hoja, el número de
+ * fila (1-based, para usar en getRange) y los valores de la fila, o null si no existe.
+ */
+function buscarFilaPorToken_(token) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('REGISTROS');
+  const datos = sheet.getDataRange().getValues();
+  for (let i = 1; i < datos.length; i++) {
+    if (datos[i][18] === token) { // columna 19 = Token_Firma
+      return { sheet: sheet, rowNumber: i + 1, rowValues: datos[i] };
+    }
+  }
+  return null;
+}
+
+/**
+ * Devuelve los datos de la Sección A (para que el receptor vea qué se le envió) dado un
+ * token de firma. No requiere CLAVE_APP: el token en sí es el secreto de acceso.
+ */
+function obtenerRegistroPorToken_(token) {
+  if (!token) return { ok: false, error: 'Falta el token.' };
+  const resultado = buscarFilaPorToken_(token);
+  if (!resultado) return { ok: false, error: 'Link inválido o el documento ya no existe.' };
+
+  const v = resultado.rowValues;
+  const estado = v[4];
+  if (estado === 'Firmado' || estado === 'Cerrado') {
+    return { ok: true, yaFirmado: true, tipo: v[1], numero: v[3] };
+  }
+
+  return {
+    ok: true,
+    yaFirmado: false,
+    tipo: v[1], numero: v[3], codigoProyecto: v[2],
+    area: v[6], planoReferencia: v[7], materia: v[8], prioridad: v[9],
+    descripcion: v[11], incidencia: v[12],
+    emisorNombre: v[13], emisorCargo: v[14], emisorFecha: v[15]
+  };
+}
+
+/**
+ * Guarda la Sección B (respuesta del receptor) dado un token de firma válido. No requiere
+ * CLAVE_APP: el token en sí es el secreto de acceso. La firma se guarda como imagen en
+ * base64 directamente en la celda (paso simplificado; subirla como archivo a Drive junto
+ * con el PDF final queda para un paso posterior).
+ */
+function firmarReceptor_(body) {
+  const resultado = buscarFilaPorToken_(body.token);
+  if (!resultado) return { ok: false, error: 'Link inválido o el documento ya no existe.' };
+
+  const estadoActual = resultado.rowValues[4];
+  if (estadoActual === 'Firmado' || estadoActual === 'Cerrado') {
+    return { ok: false, error: 'Este documento ya fue firmado anteriormente.' };
+  }
+  if (!body.receptorNombre || !body.receptorRUT) {
+    return { ok: false, error: 'Faltan datos del receptor (nombre y RUT son obligatorios).' };
+  }
+
+  const sheet = resultado.sheet;
+  const fila = resultado.rowNumber;
+  sheet.getRange(fila, 5).setValue('Firmado');            // Estado
+  sheet.getRange(fila, 20).setValue(body.receptorNombre || '');
+  sheet.getRange(fila, 21).setValue(body.receptorRUT || '');
+  sheet.getRange(fila, 22).setValue(body.receptorCargo || '');
+  sheet.getRange(fila, 23).setValue(new Date().toISOString().slice(0, 10));
+  sheet.getRange(fila, 24).setValue(body.receptorFirmaUrl || '');
+  sheet.getRange(fila, 25).setValue(body.respuesta || '');
+  sheet.getRange(fila, 34).setValue(new Date());           // Fecha_Cierre
+
+  return { ok: true, tipo: resultado.rowValues[1], numero: resultado.rowValues[3] };
 }
 
 /**
@@ -262,19 +358,25 @@ function crearRegistroBase_(body) {
     '',
     '', '', '', '', '', '', '',
     '', '', '', '', '',
-    '', new Date(), ''
+    '', new Date(), '',
+    '' // Receptor_Email
   ]);
 
   return { ok: true, id: id, numero: numero, carpetaIds: carpetaIds };
 }
 
 /**
- * Guarda el RDI/EDI completo con toda la Sección A (emisor) ya llena y firmada.
- * El envío al receptor con el link de firma remota se conecta en el próximo paso.
+ * Guarda el RDI/EDI completo con toda la Sección A (emisor) ya llena y firmada, y en el
+ * mismo paso genera el token de firma remota y envía el correo al receptor con el link.
  */
 function guardarSeccionA_(body) {
   const codigoProyecto = body.codigoProyecto;
   const tipo = body.tipo;
+  const receptorEmail = (body.receptorEmail || '').trim();
+
+  if (!receptorEmail) {
+    return { ok: false, error: 'Falta el correo del receptor.' };
+  }
 
   const validacion = validarCarpetaProyecto_(codigoProyecto);
   if (!validacion.ok) return validacion;
@@ -282,20 +384,48 @@ function guardarSeccionA_(body) {
 
   const numero = siguienteCorrelativo_(codigoProyecto, tipo);
   const id = Utilities.getUuid();
+  const token = Utilities.getUuid();
 
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName('REGISTROS');
   sheet.appendRow([
-    id, tipo, codigoProyecto, numero, 'Pendiente de envío',
+    id, tipo, codigoProyecto, numero, 'Enviado, pendiente de firma',
     body.tema || '', body.area || '', body.planoReferencia || '', body.materia || '', body.prioridad || '', body.fechaRequerida || '', body.descripcion || '', body.incidencia || '',
     body.emisorNombre || '', body.emisorCargo || '', body.emisorFecha || '', body.emisorFirmaUrl || '', (body.adjuntosEmisor || []).join(', '),
-    '', // Token_Firma (se genera en el paso de envío)
-    '', '', '', '', '', '', '', // Receptor_*
+    token,
+    '', '', '', '', '', '', '', // Receptor_Nombre / RUT / Cargo / Fecha / Firma_URL / Respuesta / Adjuntos_Receptor
     '', '', '', '', '', // Cumple / Genera_Nueva_RDI / Genera_Modif_Obra / Responsable_Analisis / Revision
-    '', new Date(), '' // PDF_Final_URL, Fecha_Creacion, Fecha_Cierre
+    '', new Date(), '', // PDF_Final_URL, Fecha_Creacion, Fecha_Cierre
+    receptorEmail
   ]);
 
+  enviarCorreoFirma_(receptorEmail, tipo, numero, codigoProyecto, token, body.emisorNombre || '', body.materia || '');
+
   return { ok: true, id: id, numero: numero, carpetaIds: carpetaIds };
+}
+
+/**
+ * Envía el correo al receptor con el link único para firmar remotamente (sin necesidad de
+ * cuenta Google). El remitente será carlos.braun@gmail.com (cuenta de despliegue), con
+ * nombre visible "Senercom - Control RDI/EDI" para que se identifique claramente.
+ */
+function enviarCorreoFirma_(destinatario, tipo, numero, codigoProyecto, token, emisorNombre, materia) {
+  const tipoLargo = tipo === 'RDI' ? 'Requerimiento de Información' : 'Entrega de Información';
+  const link = PWA_URL + '?firmar=' + token;
+  const asunto = tipo + ' ' + numero + ' — ' + codigoProyecto + (materia ? ' — ' + materia : '');
+
+  const cuerpo =
+    'Estimado/a,\n\n' +
+    (emisorNombre || 'Senercom') + ' le ha enviado un ' + tipoLargo + ' (' + numero + ') del proyecto ' + codigoProyecto + '.\n\n' +
+    'Para revisarlo y confirmar la recepción con su firma, ingrese al siguiente link:\n' + link + '\n\n' +
+    'No necesita crear ninguna cuenta para firmar.\n\n' +
+    'Sus datos (nombre, RUT, cargo y firma) se utilizan exclusivamente para dejar trazabilidad de este documento, conforme a la Ley 21.719 de Protección de Datos Personales, y no serán compartidos con terceros ajenos al proyecto.\n\n' +
+    'Saludos,\nSenercom';
+
+  GmailApp.sendEmail(destinatario, asunto, cuerpo, {
+    name: 'Senercom - Control RDI/EDI',
+    from: 'cbraun@senercom.cl' // alias verificado en la cuenta carlos.braun@gmail.com
+  });
 }
 
 // ==================== UTILIDADES ====================

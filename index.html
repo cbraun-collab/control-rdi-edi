@@ -395,7 +395,7 @@
         msg.innerHTML = 'Proyecto encontrado en ' + data.ubicaciones.length + ' ubicaciones. Se guardará una copia en cada una:<br>' + data.ubicaciones.map((u) => '• ' + u).join('<br>');
         msg.className = 'verify-msg ok';
       } else if (data.ok && data.existe){
-        carpetaVerificada = data.carpetaId;
+        carpetaVerificada = true;
         msg.textContent = 'Proyecto encontrado. Carpeta "03 - RDI EDI" lista para guardar.';
         msg.className = 'verify-msg ok';
       } else {

@@ -384,9 +384,12 @@
   // --- Verificar proyecto ---
   let carpetaVerificada = null;
   document.getElementById('btnVerificar').addEventListener('click', async () => {
+    const btnVerificar = document.getElementById('btnVerificar');
+    if (btnVerificar.disabled) return;
     const codigo = document.getElementById('f-codigo').value.trim();
     const msg = document.getElementById('verifyMsg');
     if (!codigo){ msg.textContent = 'Ingresa un código de proyecto.'; msg.className = 'verify-msg error'; return; }
+    btnVerificar.disabled = true;
     msg.textContent = 'Verificando...'; msg.className = 'verify-msg';
     try {
       const data = await llamarBackendGet({ accion: 'verificarProyecto', codigoProyecto: codigo });
@@ -406,6 +409,8 @@
     } catch(err){
       msg.textContent = 'No se pudo conectar con el backend todavía (falta desplegarlo).';
       msg.className = 'verify-msg error';
+    } finally {
+      btnVerificar.disabled = false;
     }
   });
 
@@ -506,6 +511,12 @@
       adjuntosEmisor: [] // la subida de adjuntos a Drive se conecta en el paso de envío
     };
 
+    const btnGuardar = document.getElementById('btnGuardarNuevo');
+    if (btnGuardar.disabled) return; // evita doble clic / doble envío
+    btnGuardar.disabled = true;
+    const textoOriginal = btnGuardar.textContent;
+    btnGuardar.textContent = 'Guardando...';
+
     try {
       const data = await llamarBackendPost(body);
       if (data.ok){
@@ -518,6 +529,9 @@
     } catch(err){
       errorEl.textContent = 'No se pudo conectar con el backend todavía (falta desplegarlo como aplicación web).';
       errorEl.style.display = 'block';
+    } finally {
+      btnGuardar.disabled = false;
+      btnGuardar.textContent = textoOriginal;
     }
   });
 

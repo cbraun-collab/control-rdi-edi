@@ -86,10 +86,12 @@ function formatearNumero_(tipo, numero) {
 
 // ==================== BÚSQUEDA DE LA CARPETA DE LA OBRA ====================
 /**
- * Busca en TODAS las carpetas de año el código de proyecto exacto (no como substring de
- * otro código: usa límites de palabra para que "002-014-026-MA" no confunda con
- * "002-014-026-MA-2"). Devuelve TODAS las coincidencias encontradas, para poder avisar
- * si el código está duplicado en más de una carpeta.
+ * Busca en profundidad, dentro de cada carpeta de año, el código de proyecto exacto (no
+ * como substring de otro código: usa límites de palabra). Recorre también carpetas
+ * intermedias (ej. carpetas de cliente como "002 SALFA") para encontrar el proyecto sin
+ * importar cuántos niveles de organización haya antes de llegar a él. Devuelve TODAS las
+ * coincidencias encontradas, para poder guardar en cada una si el código está en más de
+ * un lugar.
  */
 function buscarTodasCarpetasProyecto_(codigoProyecto) {
   const raiz = DriveApp.getFolderById(CARPETA_RAIZ_OBRAS_ID);
@@ -100,18 +102,26 @@ function buscarTodasCarpetasProyecto_(codigoProyecto) {
 
   while (carpetasAnio.hasNext()) {
     const carpetaAnio = carpetasAnio.next();
-    const subcarpetas = carpetaAnio.getFolders();
-    while (subcarpetas.hasNext()) {
-      const carpeta = subcarpetas.next();
-      if (patron.test(carpeta.getName())) {
-        coincidencias.push({
-          carpeta: carpeta,
-          ruta: carpetaAnio.getName() + ' / ' + carpeta.getName()
-        });
-      }
-    }
+    buscarCodigoRecursivo_(carpetaAnio, carpetaAnio.getName(), patron, coincidencias, 0);
   }
   return coincidencias;
+}
+
+// Recorre en profundidad (máximo 4 niveles) buscando carpetas cuyo nombre coincida con el
+// patrón del código de proyecto. No sigue bajando dentro de una carpeta que ya coincidió
+// (el proyecto no puede estar anidado dentro de sí mismo).
+function buscarCodigoRecursivo_(carpetaPadre, rutaActual, patron, coincidencias, profundidad) {
+  if (profundidad > 4) return;
+  const subcarpetas = carpetaPadre.getFolders();
+  while (subcarpetas.hasNext()) {
+    const carpeta = subcarpetas.next();
+    const ruta = rutaActual + ' / ' + carpeta.getName();
+    if (patron.test(carpeta.getName())) {
+      coincidencias.push({ carpeta: carpeta, ruta: ruta });
+    } else {
+      buscarCodigoRecursivo_(carpeta, ruta, patron, coincidencias, profundidad + 1);
+    }
+  }
 }
 
 /**
@@ -283,6 +293,24 @@ function guardarSeccionA_(body) {
 }
 
 // ==================== UTILIDADES ====================
+/**
+ * Borra todas las filas de prueba de REGISTROS (deja solo el encabezado) y reinicia el
+ * correlativo. Ejecutar UNA SOLA VEZ a mano desde el editor cuando se quiera limpiar
+ * datos de prueba antes de empezar a usar la app en serio.
+ */
+function limpiarDatosDePrueba() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const registros = ss.getSheetByName('REGISTROS');
+  if (registros.getLastRow() > 1) {
+    registros.deleteRows(2, registros.getLastRow() - 1);
+  }
+  const correlativos = ss.getSheetByName('CORRELATIVOS');
+  if (correlativos.getLastRow() > 1) {
+    correlativos.deleteRows(2, correlativos.getLastRow() - 1);
+  }
+  Logger.log('Datos de prueba eliminados. Los próximos RDI/EDI partirán desde el número 001.');
+}
+
 function respuestaJsonp_(callback, resultado) {
   const json = JSON.stringify(resultado);
   if (callback) {

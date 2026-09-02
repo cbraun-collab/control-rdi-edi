@@ -231,11 +231,16 @@
             <div class="firma-actions"><button id="btnLimpiarFirma">Limpiar firma</button></div>
           </div>
 
+          <div class="field">
+            <label for="f-receptor-email">Correo del receptor (mandante/cliente)</label>
+            <input type="email" id="f-receptor-email" placeholder="nombre@empresa.cl" />
+          </div>
+
           <p class="field-error" id="formError"></p>
 
           <div class="form-actions">
             <button class="btn-secondary" id="btnCancelarNuevo">Cancelar</button>
-            <button class="btn-primary" id="btnGuardarNuevo">Guardar</button>
+            <button class="btn-primary" id="btnGuardarNuevo">Guardar y enviar</button>
           </div>
         </div>
       </div>
@@ -481,6 +486,7 @@
 
     const codigo = document.getElementById('f-codigo').value.trim();
     const emisorNombre = document.getElementById('f-emisor-nombre').value.trim();
+    const receptorEmail = document.getElementById('f-receptor-email').value.trim();
 
     if (!codigo || !carpetaVerificada){
       errorEl.textContent = 'Verifica el código de proyecto antes de guardar.';
@@ -489,6 +495,11 @@
     }
     if (!emisorNombre){
       errorEl.textContent = 'Ingresa el nombre del emisor.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if (!receptorEmail || !receptorEmail.includes('@')){
+      errorEl.textContent = 'Ingresa un correo válido del receptor.';
       errorEl.style.display = 'block';
       return;
     }
@@ -510,20 +521,21 @@
       emisorNombre: emisorNombre,
       emisorCargo: document.getElementById('f-emisor-cargo').value.trim(),
       emisorFecha: new Date().toISOString().slice(0,10),
-      emisorFirmaUrl: '', // la subida de la firma a Drive se conecta en el paso de envío
-      adjuntosEmisor: [] // la subida de adjuntos a Drive se conecta en el paso de envío
+      emisorFirmaUrl: '', // la subida de la firma a Drive se conecta en un paso posterior
+      adjuntosEmisor: [], // la subida de adjuntos a Drive se conecta en un paso posterior
+      receptorEmail: receptorEmail
     };
 
     const btnGuardar = document.getElementById('btnGuardarNuevo');
     if (btnGuardar.disabled) return; // evita doble clic / doble envío
     btnGuardar.disabled = true;
     const textoOriginal = btnGuardar.textContent;
-    btnGuardar.textContent = 'Guardando...';
+    btnGuardar.textContent = 'Enviando...';
 
     try {
       const data = await llamarBackendPost(body);
       if (data.ok){
-        alert('Guardado como ' + data.numero + '. El envío al receptor se conecta en el próximo paso.');
+        alert(data.numero + ' enviado a ' + receptorEmail + '. Quedará pendiente de firma hasta que el receptor complete el link.');
         cerrarNuevo();
       } else {
         errorEl.textContent = data.error || 'No se pudo guardar.';

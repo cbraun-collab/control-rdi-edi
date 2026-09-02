@@ -115,37 +115,28 @@ function buscarTodasCarpetasProyecto_(codigoProyecto) {
 }
 
 /**
- * Recorre la carpeta raíz de obras -> cada carpeta de año -> busca la carpeta cuyo nombre
- * contiene exactamente el código de proyecto (como token completo, no substring parcial),
- * y dentro de ella busca la subcarpeta "03 - RDI EDI" en CUALQUIER nivel de profundidad.
- * Si el código aparece en más de una carpeta, devuelve un error de duplicado con el detalle
- * de dónde está cada una, para que se pueda revisar y corregir antes de cargar información.
+ * Recorre la carpeta raíz de obras -> cada carpeta de año -> busca TODAS las carpetas cuyo
+ * nombre contiene el código de proyecto (como token completo), y dentro de cada una busca
+ * la subcarpeta "03 - RDI EDI" en cualquier nivel de profundidad.
+ * Si el mismo código existe en más de un lugar (caso conocido: "03 Proyectos 2026" y
+ * "PROYECTOS 2026" duplicadas a propósito mientras se define cuál es la oficial), se
+ * devuelven TODAS las subcarpetas encontradas para que el registro se guarde en cada una
+ * y no se pierda información sea cual sea la carpeta que finalmente se use.
  */
 function buscarCarpetaRdiEdi_(codigoProyecto) {
   const coincidencias = buscarTodasCarpetasProyecto_(codigoProyecto);
+  const carpetasRdiEdi = [];
 
-  if (coincidencias.length === 0) {
-    Logger.log('No se encontró ninguna carpeta de proyecto con el código ' + codigoProyecto);
-    return { ok: true, carpetaId: null, duplicado: false };
-  }
+  coincidencias.forEach((c) => {
+    const encontrada = buscarSubcarpetaRecursiva_(c.carpeta, NOMBRE_SUBCARPETA_RDI_EDI, 0);
+    if (encontrada) {
+      carpetasRdiEdi.push({ id: encontrada.getId(), ruta: c.ruta });
+    } else {
+      Logger.log('Se encontró la carpeta del proyecto en "' + c.ruta + '" pero no tiene subcarpeta "' + NOMBRE_SUBCARPETA_RDI_EDI + '"');
+    }
+  });
 
-  if (coincidencias.length > 1) {
-    return {
-      ok: true,
-      carpetaId: null,
-      duplicado: true,
-      ubicaciones: coincidencias.map((c) => c.ruta)
-    };
-  }
-
-  const carpetaProyecto = coincidencias[0].carpeta;
-  const encontrada = buscarSubcarpetaRecursiva_(carpetaProyecto, NOMBRE_SUBCARPETA_RDI_EDI, 0);
-  if (!encontrada) {
-    Logger.log('Se encontró la carpeta del proyecto ' + codigoProyecto + ' pero no tiene subcarpeta "' + NOMBRE_SUBCARPETA_RDI_EDI + '" en ningún nivel');
-    return { ok: true, carpetaId: null, duplicado: false };
-  }
-
-  return { ok: true, carpetaId: encontrada.getId(), duplicado: false };
+  return { ok: true, carpetas: carpetasRdiEdi };
 }
 
 // Búsqueda en profundidad (máximo 4 niveles, suficiente para la estructura de obras) de una
@@ -167,22 +158,16 @@ function buscarSubcarpetaRecursiva_(carpetaPadre, nombreBuscado, profundidad) {
 }
 
 /**
- * Valida que el código de proyecto tenga una única carpeta con subcarpeta "03 - RDI EDI".
- * Devuelve un error claro y accionable si no existe o si está duplicado.
+ * Valida que el código de proyecto tenga al menos una carpeta con subcarpeta "03 - RDI EDI".
+ * Si hay más de una (código duplicado en distintas carpetas de año), las devuelve todas
+ * para que el registro se guarde en cada una.
  */
 function validarCarpetaProyecto_(codigoProyecto) {
   const busqueda = buscarCarpetaRdiEdi_(codigoProyecto);
-
-  if (busqueda.duplicado) {
-    return {
-      ok: false,
-      error: 'El código ' + codigoProyecto + ' está duplicado en más de una carpeta. Revísalo antes de continuar:\n- ' + busqueda.ubicaciones.join('\n- ')
-    };
-  }
-  if (!busqueda.carpetaId) {
+  if (busqueda.carpetas.length === 0) {
     return { ok: false, error: 'No se encontró la carpeta "03 - RDI EDI" para el código ' + codigoProyecto + '. Verifica que el proyecto exista y tenga sus subcarpetas creadas.' };
   }
-  return { ok: true, carpetaId: busqueda.carpetaId };
+  return { ok: true, carpetas: busqueda.carpetas };
 }
 
 // ==================== ENDPOINTS (JSONP) ====================
@@ -196,11 +181,12 @@ function doGet(e) {
       resultado = { ok: false, error: 'Clave de acceso inválida' };
     } else if (accion === 'verificarProyecto') {
       const busqueda = buscarCarpetaRdiEdi_(e.parameter.codigoProyecto);
-      if (busqueda.duplicado) {
-        resultado = { ok: true, existe: false, duplicado: true, ubicaciones: busqueda.ubicaciones };
-      } else {
-        resultado = { ok: true, existe: !!busqueda.carpetaId, carpetaId: busqueda.carpetaId, duplicado: false };
-      }
+      resultado = {
+        ok: true,
+        existe: busqueda.carpetas.length > 0,
+        multiple: busqueda.carpetas.length > 1,
+        ubicaciones: busqueda.carpetas.map((c) => c.ruta)
+      };
     } else if (accion === 'ping') {
       resultado = { ok: true, mensaje: 'Backend Control RDI/EDI operativo' };
     } else {
@@ -246,7 +232,7 @@ function crearRegistroBase_(body) {
 
   const validacion = validarCarpetaProyecto_(codigoProyecto);
   if (!validacion.ok) return validacion;
-  const carpetaId = validacion.carpetaId;
+  const carpetaIds = validacion.carpetas.map((c) => c.id);
 
   const numero = siguienteCorrelativo_(codigoProyecto, tipo);
   const id = Utilities.getUuid();
@@ -263,7 +249,7 @@ function crearRegistroBase_(body) {
     '', new Date(), ''
   ]);
 
-  return { ok: true, id: id, numero: numero, carpetaId: carpetaId };
+  return { ok: true, id: id, numero: numero, carpetaIds: carpetaIds };
 }
 
 /**
@@ -276,7 +262,7 @@ function guardarSeccionA_(body) {
 
   const validacion = validarCarpetaProyecto_(codigoProyecto);
   if (!validacion.ok) return validacion;
-  const carpetaId = validacion.carpetaId;
+  const carpetaIds = validacion.carpetas.map((c) => c.id);
 
   const numero = siguienteCorrelativo_(codigoProyecto, tipo);
   const id = Utilities.getUuid();
@@ -293,7 +279,7 @@ function guardarSeccionA_(body) {
     '', new Date(), '' // PDF_Final_URL, Fecha_Creacion, Fecha_Cierre
   ]);
 
-  return { ok: true, id: id, numero: numero, carpetaId: carpetaId };
+  return { ok: true, id: id, numero: numero, carpetaIds: carpetaIds };
 }
 
 // ==================== UTILIDADES ====================

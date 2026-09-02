@@ -86,42 +86,48 @@ function formatearNumero_(tipo, numero) {
 
 // ==================== BÚSQUEDA DE LA CARPETA DE LA OBRA ====================
 /**
- * Busca en profundidad, dentro de cada carpeta de año, el código de proyecto exacto (no
- * como substring de otro código: usa límites de palabra). Recorre también carpetas
- * intermedias (ej. carpetas de cliente como "002 SALFA") para encontrar el proyecto sin
- * importar cuántos niveles de organización haya antes de llegar a él. Devuelve TODAS las
- * coincidencias encontradas, para poder guardar en cada una si el código está en más de
- * un lugar.
+ * Busca el código de proyecto usando el índice de búsqueda de Drive (rápido, sin importar
+ * cuántas carpetas haya), en vez de recorrer manualmente carpeta por carpeta. Luego filtra
+ * los resultados para quedarse solo con los que están dentro de la carpeta raíz de obras
+ * (por si el mismo código apareciera por casualidad en otro lugar de Drive), y arma la ruta
+ * completa (año / cliente / proyecto) para cada coincidencia. Devuelve TODAS las
+ * coincidencias, para poder guardar en cada una si el código está en más de un lugar.
  */
 function buscarTodasCarpetasProyecto_(codigoProyecto) {
-  const raiz = DriveApp.getFolderById(CARPETA_RAIZ_OBRAS_ID);
-  const carpetasAnio = raiz.getFolders();
-  const coincidencias = [];
   const codigoEscapado = codigoProyecto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const patron = new RegExp('(^|[^0-9A-Za-z])' + codigoEscapado + '([^0-9A-Za-z]|$)', 'i');
+  const codigoBusqueda = codigoProyecto.replace(/'/g, "\\'");
 
-  while (carpetasAnio.hasNext()) {
-    const carpetaAnio = carpetasAnio.next();
-    buscarCodigoRecursivo_(carpetaAnio, carpetaAnio.getName(), patron, coincidencias, 0);
+  const query = "title contains '" + codigoBusqueda + "' and mimeType = '" + MimeType.FOLDER + "' and trashed = false";
+  const resultados = DriveApp.searchFolders(query);
+  const coincidencias = [];
+
+  while (resultados.hasNext()) {
+    const carpeta = resultados.next();
+    if (!patron.test(carpeta.getName())) continue;
+    const ruta = construirRutaDentroDeRaiz_(carpeta);
+    if (ruta) coincidencias.push({ carpeta: carpeta, ruta: ruta });
   }
   return coincidencias;
 }
 
-// Recorre en profundidad (máximo 4 niveles) buscando carpetas cuyo nombre coincida con el
-// patrón del código de proyecto. No sigue bajando dentro de una carpeta que ya coincidió
-// (el proyecto no puede estar anidado dentro de sí mismo).
-function buscarCodigoRecursivo_(carpetaPadre, rutaActual, patron, coincidencias, profundidad) {
-  if (profundidad > 4) return;
-  const subcarpetas = carpetaPadre.getFolders();
-  while (subcarpetas.hasNext()) {
-    const carpeta = subcarpetas.next();
-    const ruta = rutaActual + ' / ' + carpeta.getName();
-    if (patron.test(carpeta.getName())) {
-      coincidencias.push({ carpeta: carpeta, ruta: ruta });
-    } else {
-      buscarCodigoRecursivo_(carpeta, ruta, patron, coincidencias, profundidad + 1);
+// Verifica que la carpeta esté dentro de la carpeta raíz de obras (subiendo por sus padres,
+// máximo 8 niveles) y arma la ruta legible desde el año hasta la carpeta encontrada. Si no
+// está dentro de la raíz de obras, devuelve null (se descarta como coincidencia).
+function construirRutaDentroDeRaiz_(carpeta) {
+  const nombres = [carpeta.getName()];
+  let actual = carpeta;
+  for (let i = 0; i < 8; i++) {
+    const padres = actual.getParents();
+    if (!padres.hasNext()) return null;
+    const padre = padres.next();
+    if (padre.getId() === CARPETA_RAIZ_OBRAS_ID) {
+      return nombres.join(' / ');
     }
+    nombres.unshift(padre.getName());
+    actual = padre;
   }
+  return null;
 }
 
 /**

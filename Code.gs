@@ -73,6 +73,23 @@ function migrarColumnaReceptorEmail() {
   }
 }
 
+/**
+ * Agrega la columna "Carpeta_IDs" al final de REGISTROS si todavía no existe (guarda los
+ * IDs de carpeta "03 - RDI EDI" del registro, separados por coma, para poder guardar ahí
+ * los adjuntos que suba el receptor al responder). Ejecutar UNA SOLA VEZ a mano.
+ */
+function migrarColumnaCarpetaIds() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('REGISTROS');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headers.indexOf('Carpeta_IDs') === -1) {
+    sheet.getRange(1, sheet.getLastColumn() + 1).setValue('Carpeta_IDs');
+    Logger.log('Columna Carpeta_IDs agregada.');
+  } else {
+    Logger.log('La columna Carpeta_IDs ya existía, no se hizo nada.');
+  }
+}
+
 // ==================== CORRELATIVO POR PROYECTO Y TIPO ====================
 /**
  * Devuelve el siguiente número correlativo para un código de proyecto y tipo (RDI o EDI),
@@ -299,8 +316,9 @@ function obtenerRegistroPorToken_(token) {
     yaFirmado: false,
     tipo: v[1], numero: v[3], codigoProyecto: v[2],
     area: v[6], planoReferencia: v[7], materia: v[8], prioridad: v[9],
-    descripcion: v[11], incidencia: v[12],
-    emisorNombre: v[13], emisorCargo: v[14], emisorFecha: v[15]
+    fechaRequerida: v[10], descripcion: v[11], incidencia: v[12],
+    emisorNombre: v[13], emisorCargo: v[14], emisorFecha: v[15],
+    adjuntosEmisor: textoAArchivos_(v[17])
   };
 }
 
@@ -308,7 +326,8 @@ function obtenerRegistroPorToken_(token) {
  * Guarda la Sección B (respuesta del receptor) dado un token de firma válido. No requiere
  * CLAVE_APP: el token en sí es el secreto de acceso. La firma se guarda como imagen en
  * base64 directamente en la celda (paso simplificado; subirla como archivo a Drive junto
- * con el PDF final queda para un paso posterior).
+ * con el PDF final queda para un paso posterior). Los adjuntos que suba el receptor sí se
+ * guardan como archivos reales en las mismas carpetas donde quedó el envío original.
  */
 function firmarReceptor_(body) {
   const resultado = buscarFilaPorToken_(body.token);
@@ -322,6 +341,11 @@ function firmarReceptor_(body) {
     return { ok: false, error: 'Faltan datos del receptor (nombre y RUT son obligatorios).' };
   }
 
+  const carpetaIdsTexto = resultado.rowValues[35] || '';
+  const carpetaIds = carpetaIdsTexto ? carpetaIdsTexto.split(',').filter(Boolean) : [];
+  const archivosGuardados = guardarArchivosAdjuntos_(body.adjuntosReceptor, carpetaIds);
+  const adjuntosTexto = archivosATexto_(archivosGuardados);
+
   const sheet = resultado.sheet;
   const fila = resultado.rowNumber;
   sheet.getRange(fila, 5).setValue('Firmado');            // Estado
@@ -331,6 +355,7 @@ function firmarReceptor_(body) {
   sheet.getRange(fila, 23).setValue(new Date().toISOString().slice(0, 10));
   sheet.getRange(fila, 24).setValue(body.receptorFirmaUrl || '');
   sheet.getRange(fila, 25).setValue(body.respuesta || '');
+  sheet.getRange(fila, 26).setValue(adjuntosTexto);        // Adjuntos_Receptor
   sheet.getRange(fila, 34).setValue(new Date());           // Fecha_Cierre
 
   return { ok: true, tipo: resultado.rowValues[1], numero: resultado.rowValues[3] };
@@ -362,7 +387,8 @@ function crearRegistroBase_(body) {
     '', '', '', '', '', '', '',
     '', '', '', '', '',
     '', new Date(), '',
-    '' // Receptor_Email
+    '', // Receptor_Email
+    ''  // Carpeta_IDs
   ]);
 
   return { ok: true, id: id, numero: numero, carpetaIds: carpetaIds };
@@ -389,17 +415,21 @@ function guardarSeccionA_(body) {
   const id = Utilities.getUuid();
   const token = Utilities.getUuid();
 
+  const archivosGuardados = guardarArchivosAdjuntos_(body.adjuntosEmisor, carpetaIds);
+  const adjuntosTexto = archivosATexto_(archivosGuardados);
+
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName('REGISTROS');
   sheet.appendRow([
     id, tipo, codigoProyecto, numero, 'Enviado, pendiente de firma',
     body.tema || '', body.area || '', body.planoReferencia || '', body.materia || '', body.prioridad || '', body.fechaRequerida || '', body.descripcion || '', body.incidencia || '',
-    body.emisorNombre || '', body.emisorCargo || '', body.emisorFecha || '', body.emisorFirmaUrl || '', (body.adjuntosEmisor || []).join(', '),
+    body.emisorNombre || '', body.emisorCargo || '', body.emisorFecha || '', body.emisorFirmaUrl || '', adjuntosTexto,
     token,
     '', '', '', '', '', '', '', // Receptor_Nombre / RUT / Cargo / Fecha / Firma_URL / Respuesta / Adjuntos_Receptor
     '', '', '', '', '', // Cumple / Genera_Nueva_RDI / Genera_Modif_Obra / Responsable_Analisis / Revision
     '', new Date(), '', // PDF_Final_URL, Fecha_Creacion, Fecha_Cierre
-    receptorEmail
+    receptorEmail,
+    carpetaIds.join(',')
   ]);
 
   enviarCorreoFirma_(receptorEmail, tipo, numero, codigoProyecto, token, body.emisorNombre || '', body.materia || '');
@@ -428,6 +458,59 @@ function enviarCorreoFirma_(destinatario, tipo, numero, codigoProyecto, token, e
   GmailApp.sendEmail(destinatario, asunto, cuerpo, {
     name: 'Senercom - Control RDI/EDI',
     from: 'cbraun@senercom.cl' // alias verificado en la cuenta carlos.braun@gmail.com
+  });
+}
+
+// ==================== ARCHIVOS ADJUNTOS ====================
+/**
+ * Guarda una lista de archivos (recibidos en base64 desde el navegador) en cada una de las
+ * carpetas indicadas, y deja cada archivo compartido como "cualquiera con el link puede
+ * ver" para que el receptor externo (sin cuenta Google) pueda abrirlo desde el correo.
+ * archivos: [{ nombre, mimeType, base64 }]
+ * Devuelve: [{ nombre, urls: [url por cada carpeta] }]
+ */
+function guardarArchivosAdjuntos_(archivos, carpetaIds) {
+  if (!archivos || archivos.length === 0) return [];
+  const resultados = [];
+
+  archivos.forEach((a) => {
+    const bytes = Utilities.base64Decode(a.base64);
+    const blob = Utilities.newBlob(bytes, a.mimeType || 'application/octet-stream', a.nombre);
+    const urls = [];
+    carpetaIds.forEach((carpetaId) => {
+      try {
+        const carpeta = DriveApp.getFolderById(carpetaId);
+        const archivo = carpeta.createFile(blob);
+        archivo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        urls.push(archivo.getUrl());
+      } catch (err) {
+        Logger.log('No se pudo guardar "' + a.nombre + '" en la carpeta ' + carpetaId + ': ' + err.message);
+      }
+    });
+    resultados.push({ nombre: a.nombre, urls: urls });
+  });
+
+  return resultados;
+}
+
+// Convierte el resultado de guardarArchivosAdjuntos_ a un string "nombre: url, nombre: url"
+// para guardarlo de forma legible en una celda del Sheet (se usa la primera URL de cada
+// archivo, ya que si hay más de una carpeta son copias del mismo archivo).
+function archivosATexto_(archivosGuardados) {
+  return archivosGuardados
+    .filter((a) => a.urls.length > 0)
+    .map((a) => a.nombre + ': ' + a.urls[0])
+    .join('\n');
+}
+
+// Convierte el texto guardado en la celda de vuelta a una lista [{nombre, url}] para
+// mostrarla en la página pública de firma.
+function textoAArchivos_(texto) {
+  if (!texto) return [];
+  return texto.split('\n').filter(Boolean).map((linea) => {
+    const idx = linea.indexOf(': http');
+    if (idx === -1) return { nombre: linea, url: '' };
+    return { nombre: linea.substring(0, idx), url: linea.substring(idx + 2) };
   });
 }
 

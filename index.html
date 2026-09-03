@@ -340,11 +340,22 @@
           <div class="manual-card" id="firmaResumenA">
             <h3>Lo que se le envía</h3>
             <p id="firmaResumenTexto"></p>
+            <div id="firmaAdjuntosEmisor" style="margin-top:10px; display:none;">
+              <p style="font-size:12px; color:var(--ink-soft); margin:0 0 6px; font-weight:500;">Antecedentes adjuntos:</p>
+              <div id="firmaAdjuntosEmisorLista"></div>
+            </div>
           </div>
 
           <div class="field">
             <label for="fp-respuesta">Su respuesta (opcional)</label>
             <textarea id="fp-respuesta" placeholder="Escriba aquí su respuesta u observaciones"></textarea>
+          </div>
+
+          <div class="field">
+            <label>Adjuntar documentos de respaldo a su respuesta (opcional)</label>
+            <div class="file-drop" id="fileDropPublico">Toca aquí para adjuntar archivos</div>
+            <input type="file" id="fp-archivos" multiple style="display:none;" />
+            <div class="file-list" id="fileListPublico"></div>
           </div>
 
           <div class="field-row">
@@ -512,6 +523,24 @@
     throw ultimoError;
   }
 
+  // Convierte una lista de File a [{nombre, mimeType, base64}] para mandarlos al backend,
+  // que los guarda como archivos reales en Drive.
+  function archivoABase64_(file){
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+  async function prepararAdjuntos_(archivos){
+    return Promise.all(archivos.map(async (f) => ({
+      nombre: f.name,
+      mimeType: f.type || 'application/octet-stream',
+      base64: await archivoABase64_(f)
+    })));
+  }
+
   // --- Navegación al formulario "Nuevo" ---
   function mostrarNuevo(){
     document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.remove('active'));
@@ -650,6 +679,23 @@
     const incidencias = Array.from(document.querySelectorAll('.chk-incidencia:checked')).map((c) => c.value);
     const firmaDataUrl = canvas.toDataURL('image/png');
 
+    const btnGuardar = document.getElementById('btnGuardarNuevo');
+    if (btnGuardar.disabled) return; // evita doble clic / doble envío
+    btnGuardar.disabled = true;
+    const textoOriginal = btnGuardar.textContent;
+    btnGuardar.textContent = 'Preparando adjuntos...';
+
+    let adjuntosEmisor;
+    try {
+      adjuntosEmisor = await prepararAdjuntos_(archivosSeleccionados);
+    } catch(err){
+      errorEl.textContent = 'No se pudo leer alguno de los archivos adjuntos.';
+      errorEl.style.display = 'block';
+      btnGuardar.disabled = false;
+      btnGuardar.textContent = textoOriginal;
+      return;
+    }
+
     const body = {
       accion: 'guardarSeccionA',
       tipo: document.getElementById('f-tipo').value,
@@ -665,14 +711,10 @@
       emisorCargo: document.getElementById('f-emisor-cargo').value.trim(),
       emisorFecha: new Date().toISOString().slice(0,10),
       emisorFirmaUrl: '', // la subida de la firma a Drive se conecta en un paso posterior
-      adjuntosEmisor: [], // la subida de adjuntos a Drive se conecta en un paso posterior
+      adjuntosEmisor: adjuntosEmisor,
       receptorEmail: receptorEmail
     };
 
-    const btnGuardar = document.getElementById('btnGuardarNuevo');
-    if (btnGuardar.disabled) return; // evita doble clic / doble envío
-    btnGuardar.disabled = true;
-    const textoOriginal = btnGuardar.textContent;
     btnGuardar.textContent = 'Enviando...';
 
     try {
@@ -726,10 +768,39 @@
           document.getElementById('firmaTitulo').textContent = tipoLargo + ' ' + data.numero;
           document.getElementById('firmaSubtitulo').textContent = 'Proyecto ' + data.codigoProyecto;
           document.getElementById('firmaResumenTexto').textContent =
-            'De: ' + (data.emisorNombre || '-') + (data.emisorCargo ? ' (' + data.emisorCargo + ')' : '') + '\n' +
+            'De: ' + (data.emisorNombre || '-') + (data.emisorCargo ? ' (' + data.emisorCargo + ')' : '') + (data.emisorFecha ? ' — ' + data.emisorFecha : '') + '\n' +
             (data.area ? 'Área: ' + data.area + '\n' : '') +
+            (data.planoReferencia ? 'Plano de referencia: ' + data.planoReferencia + '\n' : '') +
             (data.materia ? 'Materia: ' + data.materia + '\n' : '') +
+            (data.prioridad ? 'Prioridad: ' + data.prioridad + '\n' : '') +
+            (data.fechaRequerida ? 'Fecha requerida de respuesta: ' + data.fechaRequerida + '\n' : '') +
+            (data.incidencia ? 'Incidencia: ' + data.incidencia + '\n' : '') +
             (data.descripcion ? 'Descripción: ' + data.descripcion : '');
+
+          const contAdjuntos = document.getElementById('firmaAdjuntosEmisor');
+          const listaAdjuntos = document.getElementById('firmaAdjuntosEmisorLista');
+          listaAdjuntos.innerHTML = '';
+          if (data.adjuntosEmisor && data.adjuntosEmisor.length > 0){
+            data.adjuntosEmisor.forEach((a) => {
+              const div = document.createElement('div');
+              div.className = 'file-item';
+              if (a.url){
+                const link = document.createElement('a');
+                link.href = a.url;
+                link.target = '_blank';
+                link.rel = 'noopener';
+                link.textContent = a.nombre;
+                link.style.color = 'var(--orange)';
+                div.appendChild(link);
+              } else {
+                div.textContent = a.nombre;
+              }
+              listaAdjuntos.appendChild(div);
+            });
+            contAdjuntos.style.display = 'block';
+          } else {
+            contAdjuntos.style.display = 'none';
+          }
 
           mostrarSolo(elContenido);
           setTimeout(ajustarCanvasPublica, 50);
@@ -742,6 +813,28 @@
 
     cargarDocumento();
     document.getElementById('btnReintentarFirma').addEventListener('click', cargarDocumento);
+
+    // --- Adjuntos del receptor (se listan en memoria y se convierten a base64 al firmar) ---
+    const archivosSeleccionadosPublico = [];
+    document.getElementById('fileDropPublico').addEventListener('click', () => document.getElementById('fp-archivos').click());
+    document.getElementById('fp-archivos').addEventListener('change', (e) => {
+      Array.from(e.target.files).forEach((f) => archivosSeleccionadosPublico.push(f));
+      renderFileListPublico();
+    });
+    function renderFileListPublico(){
+      const list = document.getElementById('fileListPublico');
+      list.innerHTML = '';
+      archivosSeleccionadosPublico.forEach((f, i) => {
+        const div = document.createElement('div');
+        div.className = 'file-item';
+        div.innerHTML = '<span>' + f.name + '</span>';
+        const btn = document.createElement('button');
+        btn.textContent = 'Quitar';
+        btn.addEventListener('click', () => { archivosSeleccionadosPublico.splice(i, 1); renderFileListPublico(); });
+        div.appendChild(btn);
+        list.appendChild(div);
+      });
+    }
 
     // --- Firma en canvas (independiente del canvas del emisor) ---
     const canvasP = document.getElementById('firmaCanvasPublica');
@@ -792,7 +885,18 @@
       if (btn.disabled) return;
       btn.disabled = true;
       const textoOriginal = btn.textContent;
-      btn.textContent = 'Enviando...';
+      btn.textContent = 'Preparando adjuntos...';
+
+      let adjuntosReceptor;
+      try {
+        adjuntosReceptor = await prepararAdjuntos_(archivosSeleccionadosPublico);
+      } catch(err){
+        errorEl.textContent = 'No se pudo leer alguno de los archivos adjuntos.';
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+        return;
+      }
 
       const body = {
         accion: 'firmarReceptor',
@@ -801,8 +905,11 @@
         receptorNombre: nombre,
         receptorRUT: rut,
         receptorCargo: document.getElementById('fp-cargo').value.trim(),
-        receptorFirmaUrl: canvasP.toDataURL('image/png')
+        receptorFirmaUrl: canvasP.toDataURL('image/png'),
+        adjuntosReceptor: adjuntosReceptor
       };
+
+      btn.textContent = 'Enviando...';
 
       try {
         const data = await llamarBackendPost(body);

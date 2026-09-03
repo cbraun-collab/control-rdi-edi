@@ -720,7 +720,11 @@
     try {
       const data = await llamarBackendPost(body);
       if (data.ok){
-        alert(data.numero + ' enviado a ' + receptorEmail + '. Quedará pendiente de firma hasta que el receptor complete el link.');
+        let mensaje = data.numero + ' enviado a ' + receptorEmail + '. Quedará pendiente de firma hasta que el receptor complete el link.';
+        if (data.erroresAdjuntos && data.erroresAdjuntos.length > 0){
+          mensaje += '\n\nAviso: no se pudieron guardar estos adjuntos:\n' + data.erroresAdjuntos.join('\n');
+        }
+        alert(mensaje);
         cerrarNuevo();
       } else {
         errorEl.textContent = data.error || 'No se pudo guardar.';
@@ -914,6 +918,10 @@
       try {
         const data = await llamarBackendPost(body);
         if (data.ok){
+          if (data.erroresAdjuntos && data.erroresAdjuntos.length > 0){
+            document.getElementById('firmaExito').querySelector('p').textContent =
+              'Quedó registrada su firma y respuesta. Aviso: no se pudieron guardar algunos adjuntos (' + data.erroresAdjuntos.length + '). Ya puede cerrar esta ventana.';
+          }
           mostrarSolo(elExito);
         } else {
           errorEl.textContent = data.error || 'No se pudo registrar la firma.';

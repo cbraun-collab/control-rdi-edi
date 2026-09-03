@@ -316,10 +316,22 @@ function obtenerRegistroPorToken_(token) {
     yaFirmado: false,
     tipo: v[1], numero: v[3], codigoProyecto: v[2],
     area: v[6], planoReferencia: v[7], materia: v[8], prioridad: v[9],
-    fechaRequerida: v[10], descripcion: v[11], incidencia: v[12],
-    emisorNombre: v[13], emisorCargo: v[14], emisorFecha: v[15],
+    fechaRequerida: formatearFecha_(v[10]), descripcion: v[11], incidencia: v[12],
+    emisorNombre: v[13], emisorCargo: v[14], emisorFecha: formatearFecha_(v[15]),
     adjuntosEmisor: textoAArchivos_(v[17])
   };
+}
+
+// El Sheet convierte automáticamente los textos con forma de fecha (ej. "2026-09-03") en
+// un objeto Date real dentro de la celda; al leerlo con getValues() vuelve como Date, y
+// JSON.stringify lo transforma en un timestamp completo feo de leer. Esto lo deja en
+// formato DD-MM-AAAA para mostrarlo bien al receptor.
+function formatearFecha_(valor) {
+  if (!valor) return '';
+  if (valor instanceof Date) {
+    return Utilities.formatDate(valor, 'GMT', 'dd-MM-yyyy');
+  }
+  return valor;
 }
 
 /**
@@ -343,8 +355,8 @@ function firmarReceptor_(body) {
 
   const carpetaIdsTexto = resultado.rowValues[35] || '';
   const carpetaIds = carpetaIdsTexto ? carpetaIdsTexto.split(',').filter(Boolean) : [];
-  const archivosGuardados = guardarArchivosAdjuntos_(body.adjuntosReceptor, carpetaIds);
-  const adjuntosTexto = archivosATexto_(archivosGuardados);
+  const resultadoArchivos = guardarArchivosAdjuntos_(body.adjuntosReceptor, carpetaIds);
+  const adjuntosTexto = archivosATexto_(resultadoArchivos.archivos);
 
   const sheet = resultado.sheet;
   const fila = resultado.rowNumber;
@@ -358,7 +370,39 @@ function firmarReceptor_(body) {
   sheet.getRange(fila, 26).setValue(adjuntosTexto);        // Adjuntos_Receptor
   sheet.getRange(fila, 34).setValue(new Date());           // Fecha_Cierre
 
-  return { ok: true, tipo: resultado.rowValues[1], numero: resultado.rowValues[3] };
+  const tipo = resultado.rowValues[1];
+  const numero = resultado.rowValues[3];
+  const codigoProyecto = resultado.rowValues[2];
+  enviarAvisoFirma_(tipo, numero, codigoProyecto, body.receptorNombre, body.receptorCargo, body.respuesta, resultadoArchivos.archivos);
+
+  return { ok: true, tipo: tipo, numero: numero, erroresAdjuntos: resultadoArchivos.errores };
+}
+
+/**
+ * Avisa a cbraun@senercom.cl cuando el receptor firma, para no tener que estar revisando
+ * el Sheet manualmente.
+ */
+function enviarAvisoFirma_(tipo, numero, codigoProyecto, receptorNombre, receptorCargo, respuesta, archivosGuardados) {
+  const asunto = tipo + ' ' + numero + ' firmado por ' + receptorNombre;
+  let cuerpo =
+    'El ' + tipo + ' ' + numero + ' del proyecto ' + codigoProyecto + ' fue firmado.\n\n' +
+    'Receptor: ' + receptorNombre + (receptorCargo ? ' (' + receptorCargo + ')' : '') + '\n\n' +
+    (respuesta ? 'Respuesta:\n' + respuesta + '\n\n' : 'Sin respuesta escrita.\n\n');
+
+  if (archivosGuardados && archivosGuardados.length > 0) {
+    cuerpo += 'Adjuntó los siguientes documentos:\n';
+    archivosGuardados.forEach((a) => {
+      cuerpo += '- ' + a.nombre + (a.urls[0] ? ': ' + a.urls[0] : '') + '\n';
+    });
+    cuerpo += '\n';
+  }
+
+  cuerpo += 'Ver todo el detalle en el Sheet: ' + 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit';
+
+  GmailApp.sendEmail('cbraun@senercom.cl', asunto, cuerpo, {
+    name: 'Senercom - Control RDI/EDI',
+    from: 'cbraun@senercom.cl'
+  });
 }
 
 /**
@@ -415,8 +459,8 @@ function guardarSeccionA_(body) {
   const id = Utilities.getUuid();
   const token = Utilities.getUuid();
 
-  const archivosGuardados = guardarArchivosAdjuntos_(body.adjuntosEmisor, carpetaIds);
-  const adjuntosTexto = archivosATexto_(archivosGuardados);
+  const resultadoArchivos = guardarArchivosAdjuntos_(body.adjuntosEmisor, carpetaIds);
+  const adjuntosTexto = archivosATexto_(resultadoArchivos.archivos);
 
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName('REGISTROS');
@@ -434,7 +478,7 @@ function guardarSeccionA_(body) {
 
   enviarCorreoFirma_(receptorEmail, tipo, numero, codigoProyecto, token, body.emisorNombre || '', body.materia || '');
 
-  return { ok: true, id: id, numero: numero, carpetaIds: carpetaIds };
+  return { ok: true, id: id, numero: numero, carpetaIds: carpetaIds, erroresAdjuntos: resultadoArchivos.errores };
 }
 
 /**
@@ -470,8 +514,9 @@ function enviarCorreoFirma_(destinatario, tipo, numero, codigoProyecto, token, e
  * Devuelve: [{ nombre, urls: [url por cada carpeta] }]
  */
 function guardarArchivosAdjuntos_(archivos, carpetaIds) {
-  if (!archivos || archivos.length === 0) return [];
+  if (!archivos || archivos.length === 0) return { archivos: [], errores: [] };
   const resultados = [];
+  const errores = [];
 
   archivos.forEach((a) => {
     const bytes = Utilities.base64Decode(a.base64);
@@ -484,13 +529,15 @@ function guardarArchivosAdjuntos_(archivos, carpetaIds) {
         archivo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
         urls.push(archivo.getUrl());
       } catch (err) {
-        Logger.log('No se pudo guardar "' + a.nombre + '" en la carpeta ' + carpetaId + ': ' + err.message);
+        const mensaje = 'No se pudo guardar "' + a.nombre + '": ' + err.message;
+        Logger.log(mensaje);
+        errores.push(mensaje);
       }
     });
     resultados.push({ nombre: a.nombre, urls: urls });
   });
 
-  return resultados;
+  return { archivos: resultados, errores: errores };
 }
 
 // Convierte el resultado de guardarArchivosAdjuntos_ a un string "nombre: url, nombre: url"

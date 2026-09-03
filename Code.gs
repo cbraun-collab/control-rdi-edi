@@ -210,10 +210,7 @@ function doGet(e) {
   let resultado;
 
   try {
-    if (accion === 'obtenerRegistroPorToken') {
-      // Endpoint público: el receptor externo no tiene la CLAVE_APP, el token es el secreto.
-      resultado = obtenerRegistroPorToken_(e.parameter.token);
-    } else if (e.parameter.clave !== CLAVE_APP) {
+    if (e.parameter.clave !== CLAVE_APP) {
       resultado = { ok: false, error: 'Clave de acceso inválida' };
     } else if (accion === 'verificarProyecto') {
       const busqueda = buscarCarpetaRdiEdi_(e.parameter.codigoProyecto);
@@ -243,6 +240,12 @@ function doPost(e) {
     if (body.accion === 'firmarReceptor') {
       // Endpoint público: el receptor externo no tiene la CLAVE_APP, el token es el secreto.
       resultado = firmarReceptor_(body);
+    } else if (body.accion === 'obtenerRegistroPorToken') {
+      // Endpoint público: el receptor externo no tiene la CLAVE_APP, el token es el secreto.
+      // Se atiende por POST (no por GET/JSONP) porque el redireccionamiento que usa Google
+      // para las respuestas de doGet en apps "Cualquier usuario" falla de forma intermitente
+      // para sesiones anónimas (sin login de Google) — el POST vía fetch nunca ha fallado.
+      resultado = obtenerRegistroPorToken_(body.token);
     } else if (body.clave !== CLAVE_APP) {
       resultado = { ok: false, error: 'Clave de acceso inválida' };
     } else if (body.accion === 'crearRegistroBase') {

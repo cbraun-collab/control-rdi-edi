@@ -708,7 +708,7 @@
 
     function cargarDocumento(){
       mostrarSolo(elCargando);
-      llamarBackendGet({ accion: 'obtenerRegistroPorToken', token: token })
+      llamarBackendPost({ accion: 'obtenerRegistroPorToken', token: token })
         .then((data) => {
           if (!data.ok){
             document.getElementById('firmaErrorTexto').textContent = data.error || 'Link inválido.';

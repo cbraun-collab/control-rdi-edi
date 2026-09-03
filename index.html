@@ -324,6 +324,7 @@
       <div id="firmaError" class="empty-state" style="display:none;">
         <strong>No se pudo cargar el documento</strong>
         <p id="firmaErrorTexto">Link inválido o el documento ya no existe.</p>
+        <button class="btn-primary" id="btnReintentarFirma" style="margin-top:14px;">Reintentar</button>
       </div>
 
       <div id="firmaYaFirmado" class="empty-state" style="display:none;">
@@ -438,26 +439,77 @@
   const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzpS8fOUVSjHtmrmvinZcIjC96BXan_p3OGKVTrEOu2fch7Bj_8TAQot1TpMoD92S0G0g/exec';
   const CLAVE_APP = 'senercom2026';
 
-  function llamarBackendGet(params){
+  function llamarBackendGetUnaVez_(params){
     return new Promise((resolve, reject) => {
       if (!BACKEND_URL){ reject(new Error('BACKEND_URL no configurado todavía')); return; }
-      const cbName = 'cb_' + Date.now();
-      window[cbName] = (data) => { resolve(data); delete window[cbName]; script.remove(); };
+      const cbName = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+      let terminado = false;
+      const limpiar = () => { delete window[cbName]; if (script.parentNode) script.remove(); };
+      const timeoutId = setTimeout(() => {
+        if (terminado) return;
+        terminado = true;
+        limpiar();
+        reject(new Error('Tiempo de espera agotado'));
+      }, 10000);
+      window[cbName] = (data) => {
+        if (terminado) return;
+        terminado = true;
+        clearTimeout(timeoutId);
+        limpiar();
+        resolve(data);
+      };
       const query = new URLSearchParams({ ...params, clave: CLAVE_APP, callback: cbName }).toString();
       const script = document.createElement('script');
       script.src = BACKEND_URL + '?' + query;
-      script.onerror = () => reject(new Error('Error de conexión con el backend'));
+      script.onerror = () => {
+        if (terminado) return;
+        terminado = true;
+        clearTimeout(timeoutId);
+        limpiar();
+        reject(new Error('Error de conexión con el backend'));
+      };
       document.body.appendChild(script);
     });
   }
 
-  async function llamarBackendPost(body){
+  // El backend de Apps Script en modo "Cualquier usuario" a veces falla de forma intermitente
+  // para llamadas verdaderamente anónimas (sin sesión de Google activa, como en la página
+  // pública de firma). Se reintenta automáticamente antes de mostrar un error al usuario.
+  async function llamarBackendGet(params, intentos){
+    intentos = intentos || 3;
+    let ultimoError;
+    for (let i = 0; i < intentos; i++){
+      try {
+        return await llamarBackendGetUnaVez_(params);
+      } catch(err){
+        ultimoError = err;
+        if (i < intentos - 1) await new Promise((r) => setTimeout(r, 800));
+      }
+    }
+    throw ultimoError;
+  }
+
+  async function llamarBackendPostUnaVez_(body){
     if (!BACKEND_URL) throw new Error('BACKEND_URL no configurado todavía');
     const res = await fetch(BACKEND_URL, {
       method: 'POST',
       body: JSON.stringify({ ...body, clave: CLAVE_APP })
     });
     return res.json();
+  }
+
+  async function llamarBackendPost(body, intentos){
+    intentos = intentos || 3;
+    let ultimoError;
+    for (let i = 0; i < intentos; i++){
+      try {
+        return await llamarBackendPostUnaVez_(body);
+      } catch(err){
+        ultimoError = err;
+        if (i < intentos - 1) await new Promise((r) => setTimeout(r, 800));
+      }
+    }
+    throw ultimoError;
   }
 
   // --- Navegación al formulario "Nuevo" ---
@@ -654,36 +706,42 @@
       el.style.display = 'block';
     }
 
-    llamarBackendGet({ accion: 'obtenerRegistroPorToken', token: token })
-      .then((data) => {
-        if (!data.ok){
-          document.getElementById('firmaErrorTexto').textContent = data.error || 'Link inválido.';
+    function cargarDocumento(){
+      mostrarSolo(elCargando);
+      llamarBackendGet({ accion: 'obtenerRegistroPorToken', token: token })
+        .then((data) => {
+          if (!data.ok){
+            document.getElementById('firmaErrorTexto').textContent = data.error || 'Link inválido.';
+            mostrarSolo(elError);
+            return;
+          }
+          if (data.yaFirmado){
+            document.getElementById('firmaYaFirmadoTexto').textContent =
+              'El ' + data.tipo + ' ' + data.numero + ' ya fue firmado anteriormente.';
+            mostrarSolo(elYaFirmado);
+            return;
+          }
+
+          const tipoLargo = data.tipo === 'RDI' ? 'Requerimiento de Información' : 'Entrega de Información';
+          document.getElementById('firmaTitulo').textContent = tipoLargo + ' ' + data.numero;
+          document.getElementById('firmaSubtitulo').textContent = 'Proyecto ' + data.codigoProyecto;
+          document.getElementById('firmaResumenTexto').textContent =
+            'De: ' + (data.emisorNombre || '-') + (data.emisorCargo ? ' (' + data.emisorCargo + ')' : '') + '\n' +
+            (data.area ? 'Área: ' + data.area + '\n' : '') +
+            (data.materia ? 'Materia: ' + data.materia + '\n' : '') +
+            (data.descripcion ? 'Descripción: ' + data.descripcion : '');
+
+          mostrarSolo(elContenido);
+          setTimeout(ajustarCanvasPublica, 50);
+        })
+        .catch(() => {
+          document.getElementById('firmaErrorTexto').textContent = 'No se pudo conectar con el servidor. Intente de nuevo.';
           mostrarSolo(elError);
-          return;
-        }
-        if (data.yaFirmado){
-          document.getElementById('firmaYaFirmadoTexto').textContent =
-            'El ' + data.tipo + ' ' + data.numero + ' ya fue firmado anteriormente.';
-          mostrarSolo(elYaFirmado);
-          return;
-        }
+        });
+    }
 
-        const tipoLargo = data.tipo === 'RDI' ? 'Requerimiento de Información' : 'Entrega de Información';
-        document.getElementById('firmaTitulo').textContent = tipoLargo + ' ' + data.numero;
-        document.getElementById('firmaSubtitulo').textContent = 'Proyecto ' + data.codigoProyecto;
-        document.getElementById('firmaResumenTexto').textContent =
-          'De: ' + (data.emisorNombre || '-') + (data.emisorCargo ? ' (' + data.emisorCargo + ')' : '') + '\n' +
-          (data.area ? 'Área: ' + data.area + '\n' : '') +
-          (data.materia ? 'Materia: ' + data.materia + '\n' : '') +
-          (data.descripcion ? 'Descripción: ' + data.descripcion : '');
-
-        mostrarSolo(elContenido);
-        setTimeout(ajustarCanvasPublica, 50);
-      })
-      .catch(() => {
-        document.getElementById('firmaErrorTexto').textContent = 'No se pudo conectar con el servidor. Intente de nuevo más tarde.';
-        mostrarSolo(elError);
-      });
+    cargarDocumento();
+    document.getElementById('btnReintentarFirma').addEventListener('click', cargarDocumento);
 
     // --- Firma en canvas (independiente del canvas del emisor) ---
     const canvasP = document.getElementById('firmaCanvasPublica');

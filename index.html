@@ -750,7 +750,7 @@
       emisorNombre: emisorNombre,
       emisorCargo: document.getElementById('f-emisor-cargo').value.trim(),
       emisorFecha: new Date().toISOString().slice(0,10),
-      emisorFirmaUrl: '', // la subida de la firma a Drive se conecta en un paso posterior
+      emisorFirmaUrl: firmaDataUrl,
       adjuntosEmisor: adjuntosEmisor,
       receptorEmail: receptorEmail
     };

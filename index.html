@@ -112,6 +112,34 @@
   .firma-publica-logo{height:44px; display:block; margin:0 auto 20px;}
   .firma-subtitulo{font-size:13px; color:var(--ink-soft); margin:-8px 0 16px;}
   #firmaResumenTexto{white-space:pre-line; font-size:13px; color:var(--ink-soft); margin:0;}
+
+  /* --- Listado RDI/EDI (Bandeja / Pendientes / Historial) --- */
+  .rdi-toolbar{display:flex; justify-content:flex-end; margin-bottom:10px;}
+  .rdi-refresh{background:none; border:1px solid var(--line); border-radius:8px; padding:6px 12px; font-family:var(--font-display); font-size:12.5px; color:var(--ink-soft); cursor:pointer;}
+  .rdi-refresh:hover{border-color:var(--teal); color:var(--teal);}
+  .rdi-list{display:flex; flex-direction:column; gap:10px;}
+  .rdi-card{background:var(--white); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; cursor:pointer; transition:border-color .15s;}
+  .rdi-card:hover{border-color:var(--teal);}
+  .rdi-card-top{display:flex; align-items:center; gap:8px; margin-bottom:6px;}
+  .rdi-badge{font-family:var(--font-mono); font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; color:var(--white);}
+  .rdi-badge.rdi{background:var(--teal);}
+  .rdi-badge.edi{background:var(--orange);}
+  .rdi-numero{font-family:var(--font-mono); font-size:13px; color:var(--ink-soft);}
+  .rdi-estado{margin-left:auto; font-size:11.5px; color:var(--ink-soft); background:var(--cream); border-radius:999px; padding:2px 10px;}
+  .rdi-tema{font-size:14.5px; font-weight:600; margin:0 0 2px;}
+  .rdi-meta{font-size:12.5px; color:var(--ink-soft);}
+
+  /* --- Modal de detalle --- */
+  .rdi-modal-bg{display:none; position:fixed; inset:0; background:rgba(20,32,31,.55); z-index:50; align-items:flex-end; justify-content:center;}
+  .rdi-modal-bg.active{display:flex;}
+  .rdi-modal{background:var(--white); border-radius:16px 16px 0 0; max-width:520px; width:100%; max-height:85vh; overflow-y:auto; padding:20px;}
+  @media (min-width:640px){ .rdi-modal-bg{align-items:center;} .rdi-modal{border-radius:16px;} }
+  .rdi-modal-close{float:right; background:none; border:none; font-size:20px; color:var(--ink-soft); cursor:pointer;}
+  .rdi-modal h3{margin:0 0 4px; font-size:17px;}
+  .rdi-modal .rdi-field{margin:10px 0; font-size:13.5px;}
+  .rdi-modal .rdi-field label{display:block; font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-soft); margin-bottom:2px;}
+  .rdi-modal-actions{display:flex; flex-direction:column; gap:8px; margin-top:16px;}
+  .rdi-modal-actions a, .rdi-modal-actions button{text-align:center; text-decoration:none;}
 </style>
 </head>
 <body>
@@ -253,10 +281,12 @@
       </div>
 
       <div class="view active" id="view-bandeja">
-        <div class="empty-state">
+        <div class="rdi-toolbar"><button class="rdi-refresh" onclick="cargarListadosRDIEDI_(true)">↻ Actualizar</button></div>
+        <div class="empty-state" id="empty-bandeja">
           <strong>Aún no hay RDI ni EDI creados</strong>
           <p>Usa el botón "+" para levantar un nuevo requerimiento o entrega de información.</p>
         </div>
+        <div class="rdi-list" id="lista-bandeja"></div>
         <div class="lpdp-note">
           <strong>Nota — Ley 21.719 de Protección de Datos Personales</strong>
           Los datos de contacto (nombre, RUT, cargo, firma) ingresados en esta aplicación se utilizan exclusivamente para dejar trazabilidad de los requerimientos y entregas de información entre Senercom y sus mandantes o clientes, y no serán compartidos con terceros ajenos al proyecto.
@@ -264,17 +294,21 @@
       </div>
 
       <div class="view" id="view-pendientes">
-        <div class="empty-state">
+        <div class="rdi-toolbar"><button class="rdi-refresh" onclick="cargarListadosRDIEDI_(true)">↻ Actualizar</button></div>
+        <div class="empty-state" id="empty-pendientes">
           <strong>Sin RDI/EDI pendientes de firma</strong>
           <p>Aquí aparecerán los documentos enviados que esperan la firma del receptor.</p>
         </div>
+        <div class="rdi-list" id="lista-pendientes"></div>
       </div>
 
       <div class="view" id="view-historial">
-        <div class="empty-state">
+        <div class="rdi-toolbar"><button class="rdi-refresh" onclick="cargarListadosRDIEDI_(true)">↻ Actualizar</button></div>
+        <div class="empty-state" id="empty-historial">
           <strong>Historial vacío</strong>
           <p>Los RDI/EDI cerrados (firmados por ambas partes) quedarán listados aquí.</p>
         </div>
+        <div class="rdi-list" id="lista-historial"></div>
       </div>
 
       <div class="view" id="view-manual">
@@ -443,8 +477,14 @@
       document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById('view-' + btn.dataset.view).classList.add('active');
+      if (['bandeja', 'pendientes', 'historial'].includes(btn.dataset.view)) {
+        cargarListadosRDIEDI_(false);
+      }
     });
   });
+  // Bandeja es la pestaña activa por defecto al abrir la app (sin clic de por medio),
+  // así que se carga una vez al inicio si no estamos en el flujo de firma pública.
+  if (!tokenFirma) cargarListadosRDIEDI_(false);
 
   // --- Backend: URL del Web App de Apps Script (se completa al desplegar el backend) ---
   const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzpS8fOUVSjHtmrmvinZcIjC96BXan_p3OGKVTrEOu2fch7Bj_8TAQot1TpMoD92S0G0g/exec';
@@ -935,6 +975,138 @@
         btn.textContent = textoOriginal;
       }
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // Listado de RDI/EDI (Bandeja / Pendientes de firma / Historial)
+  // ---------------------------------------------------------------------
+  let _cacheRegistrosRDIEDI = null;
+
+  async function cargarListadosRDIEDI_(forzar) {
+    if (_cacheRegistrosRDIEDI && !forzar) {
+      renderTodosLosListados_();
+      return;
+    }
+    try {
+      const data = await llamarBackendGet({ accion: 'listarRegistros' });
+      if (!data.ok) throw new Error(data.error || 'No se pudo cargar el listado.');
+      _cacheRegistrosRDIEDI = data.registros;
+      renderTodosLosListados_();
+    } catch (err) {
+      console.error('Error cargando listado RDI/EDI:', err);
+    }
+  }
+
+  function renderTodosLosListados_() {
+    const todos = _cacheRegistrosRDIEDI || [];
+    const pendientes = todos.filter((r) => r.tieneToken && !r.firmadoPorReceptor);
+    const historial = todos.filter((r) => r.firmadoPorReceptor);
+
+    renderListaEnVista_('bandeja', todos);
+    renderListaEnVista_('pendientes', pendientes);
+    renderListaEnVista_('historial', historial);
+  }
+
+  function renderListaEnVista_(vista, registros) {
+    const cont = document.getElementById('lista-' + vista);
+    const empty = document.getElementById('empty-' + vista);
+    if (!cont || !empty) return;
+
+    if (registros.length === 0) {
+      cont.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    cont.innerHTML = registros.map(tarjetaRegistroHTML_).join('');
+  }
+
+  function tarjetaRegistroHTML_(r) {
+    const tipoClase = r.Tipo === 'EDI' ? 'edi' : 'rdi';
+    // r.Numero ya viene formateado como "RDI-014" / "EDI-001" — se usa tal cual.
+    const fecha = formatearFechaCorta_(r.Fecha_Creacion);
+    return `
+      <div class="rdi-card" onclick="abrirDetalleRDIEDI_('${r.ID}')">
+        <div class="rdi-card-top">
+          <span class="rdi-badge ${tipoClase}">${r.Tipo}</span>
+          <span class="rdi-numero">${escaparHTML_(r.Numero)}</span>
+          <span class="rdi-estado">${r.Estado || (r.firmadoPorReceptor ? 'Cerrado' : 'Pendiente')}</span>
+        </div>
+        <p class="rdi-tema">${escaparHTML_(r.Tema || r.Codigo_Proyecto)}</p>
+        <p class="rdi-meta">${escaparHTML_(r.Codigo_Proyecto)} · ${escaparHTML_(r.Emisor_Nombre || '')} · ${fecha}</p>
+      </div>
+    `;
+  }
+
+  function formatearFechaCorta_(valor) {
+    if (!valor) return '';
+    const d = new Date(valor);
+    if (isNaN(d.getTime())) return String(valor);
+    return d.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  function escaparHTML_(v) {
+    const div = document.createElement('div');
+    div.textContent = String(v || '');
+    return div.innerHTML;
+  }
+
+  // --- Modal de detalle ---
+  async function abrirDetalleRDIEDI_(id) {
+    asegurarModalRDIEDI_();
+    const modalBg = document.getElementById('rdiModalBg');
+    const modalBody = document.getElementById('rdiModalBody');
+    modalBody.innerHTML = '<p>Cargando...</p>';
+    modalBg.classList.add('active');
+
+    try {
+      const data = await llamarBackendGet({ accion: 'obtenerRegistroPorId', id: id });
+      if (!data.ok) throw new Error(data.error || 'No se pudo cargar el registro.');
+      modalBody.innerHTML = detalleRegistroHTML_(data.registro);
+    } catch (err) {
+      modalBody.innerHTML = '<p>Error al cargar el detalle: ' + escaparHTML_(err.message) + '</p>';
+    }
+  }
+
+  function detalleRegistroHTML_(r) {
+    const pendienteFirma = r.Token_Firma && !r.Receptor_Fecha;
+    const linkFirma = location.origin + location.pathname + '?firmar=' + encodeURIComponent(r.Token_Firma || '');
+
+    let acciones = '';
+    if (r.PDF_Final_URL) {
+      acciones += `<a class="btn-primary" href="${r.PDF_Final_URL}" target="_blank" rel="noopener">Ver PDF final</a>`;
+    }
+    if (pendienteFirma) {
+      acciones += `<button class="btn-primary" onclick="navigator.clipboard.writeText('${linkFirma}'); this.textContent='Link copiado ✓';">Copiar link de firma</button>`;
+    }
+
+    return `
+      <button class="rdi-modal-close" onclick="cerrarModalRDIEDI_()">✕</button>
+      <h3>${escaparHTML_(r.Numero)}</h3>
+      <p class="rdi-meta">${escaparHTML_(r.Codigo_Proyecto)} · ${escaparHTML_(r.Estado || '')}</p>
+
+      <div class="rdi-field"><label>Tema</label>${escaparHTML_(r.Tema)}</div>
+      <div class="rdi-field"><label>Descripción</label>${escaparHTML_(r.Descripcion)}</div>
+      <div class="rdi-field"><label>Emisor</label>${escaparHTML_(r.Emisor_Nombre)} — ${escaparHTML_(r.Emisor_Cargo)}</div>
+      ${r.Receptor_Nombre ? `<div class="rdi-field"><label>Receptor</label>${escaparHTML_(r.Receptor_Nombre)} — ${escaparHTML_(r.Receptor_Cargo)}</div>` : ''}
+      ${r.Respuesta ? `<div class="rdi-field"><label>Respuesta</label>${escaparHTML_(r.Respuesta)}</div>` : ''}
+
+      <div class="rdi-modal-actions">${acciones}</div>
+    `;
+  }
+
+  function asegurarModalRDIEDI_() {
+    if (document.getElementById('rdiModalBg')) return;
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="rdi-modal-bg" id="rdiModalBg" onclick="if(event.target===this) cerrarModalRDIEDI_()">
+        <div class="rdi-modal" id="rdiModalBody"></div>
+      </div>
+    `);
+  }
+
+  function cerrarModalRDIEDI_() {
+    const modalBg = document.getElementById('rdiModalBg');
+    if (modalBg) modalBg.classList.remove('active');
   }
 
   // --- Service worker ---

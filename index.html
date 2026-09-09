@@ -199,6 +199,11 @@
           </div>
           <p class="verify-msg" id="verifyMsg"></p>
 
+          <div class="field">
+            <label for="f-tema">Tema / nombre de la obra (opcional)</label>
+            <input type="text" id="f-tema" placeholder="Ej: Hotel Cabo de Hornos - Torre 1" />
+          </div>
+
           <div class="field-row">
             <div class="field">
               <label for="f-area">Área</label>
@@ -761,6 +766,7 @@
       accion: 'guardarSeccionA',
       tipo: document.getElementById('f-tipo').value,
       codigoProyecto: codigo,
+      tema: document.getElementById('f-tema').value.trim(),
       area: document.getElementById('f-area').value.trim(),
       planoReferencia: document.getElementById('f-plano').value.trim(),
       materia: document.getElementById('f-materia').value.trim(),
@@ -831,7 +837,8 @@
 
           const tipoLargo = data.tipo === 'RDI' ? 'Requerimiento de Información' : 'Entrega de Información';
           document.getElementById('firmaTitulo').textContent = tipoLargo + ' ' + data.numero;
-          document.getElementById('firmaSubtitulo').textContent = 'Proyecto ' + data.codigoProyecto;
+          document.getElementById('firmaSubtitulo').textContent =
+            'Proyecto ' + data.codigoProyecto + (data.tema ? ' — ' + data.tema : '');
           document.getElementById('firmaResumenTexto').textContent =
             'De: ' + (data.emisorNombre || '-') + (data.emisorCargo ? ' (' + data.emisorCargo + ')' : '') + (data.emisorFecha ? ' — ' + data.emisorFecha : '') + '\n' +
             (data.area ? 'Área: ' + data.area + '\n' : '') +

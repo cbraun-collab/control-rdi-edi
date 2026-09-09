@@ -670,6 +670,10 @@
   // --- Firma en canvas (fondo blanco antes de toDataURL, lección ya conocida) ---
   const canvas = document.getElementById('firmaCanvas');
   const ctx = canvas.getContext('2d');
+  // Marca si realmente se dibujó algo en el recuadro (no basta con tener
+  // nombre y RUT) — evita que quede un documento "firmado" con la firma en
+  // blanco.
+  let firmaEmisorTrazada = false;
   function ajustarCanvas(){
     const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width;
@@ -679,6 +683,7 @@
     ctx.strokeStyle = '#14201F';
     ctx.lineWidth = 2;
     ctx.lineCap = 'round';
+    firmaEmisorTrazada = false;
   }
   window.addEventListener('resize', ajustarCanvas);
   setTimeout(ajustarCanvas, 50);
@@ -689,7 +694,7 @@
     const punto = e.touches ? e.touches[0] : e;
     return { x: punto.clientX - rect.left, y: punto.clientY - rect.top };
   }
-  function iniciarTrazo(e){ dibujando = true; const p = posicion(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }
+  function iniciarTrazo(e){ dibujando = true; firmaEmisorTrazada = true; const p = posicion(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }
   function trazar(e){ if (!dibujando) return; const p = posicion(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); }
   function terminarTrazo(){ dibujando = false; }
   canvas.addEventListener('mousedown', iniciarTrazo);
@@ -723,6 +728,11 @@
     }
     if (!receptorEmail || !receptorEmail.includes('@')){
       errorEl.textContent = 'Ingresa un correo válido del receptor.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if (!firmaEmisorTrazada){
+      errorEl.textContent = 'Debe firmar el documento antes de enviarlo (el recuadro de firma está vacío).';
       errorEl.style.display = 'block';
       return;
     }
@@ -894,6 +904,9 @@
     // --- Firma en canvas (independiente del canvas del emisor) ---
     const canvasP = document.getElementById('firmaCanvasPublica');
     const ctxP = canvasP.getContext('2d');
+    // Misma protección que en la firma del emisor: no basta con nombre y RUT,
+    // hay que haber dibujado algo en el recuadro.
+    let firmaReceptorTrazada = false;
     function ajustarCanvasPublica(){
       const rect = canvasP.getBoundingClientRect();
       canvasP.width = rect.width;
@@ -903,6 +916,7 @@
       ctxP.strokeStyle = '#14201F';
       ctxP.lineWidth = 2;
       ctxP.lineCap = 'round';
+      firmaReceptorTrazada = false;
     }
     window.addEventListener('resize', ajustarCanvasPublica);
 
@@ -912,7 +926,7 @@
       const punto = e.touches ? e.touches[0] : e;
       return { x: punto.clientX - rect.left, y: punto.clientY - rect.top };
     }
-    function iniciarTrazoP(e){ dibujandoP = true; const p = posicionP(e); ctxP.beginPath(); ctxP.moveTo(p.x, p.y); e.preventDefault(); }
+    function iniciarTrazoP(e){ dibujandoP = true; firmaReceptorTrazada = true; const p = posicionP(e); ctxP.beginPath(); ctxP.moveTo(p.x, p.y); e.preventDefault(); }
     function trazarP(e){ if (!dibujandoP) return; const p = posicionP(e); ctxP.lineTo(p.x, p.y); ctxP.stroke(); e.preventDefault(); }
     function terminarTrazoP(){ dibujandoP = false; }
     canvasP.addEventListener('mousedown', iniciarTrazoP);
@@ -932,6 +946,11 @@
       const rut = document.getElementById('fp-rut').value.trim();
       if (!nombre || !rut){
         errorEl.textContent = 'Ingresa tu nombre y RUT antes de firmar.';
+        errorEl.style.display = 'block';
+        return;
+      }
+      if (!firmaReceptorTrazada){
+        errorEl.textContent = 'Debe firmar en el recuadro antes de continuar (está vacío).';
         errorEl.style.display = 'block';
         return;
       }

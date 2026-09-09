@@ -114,7 +114,9 @@
   #firmaResumenTexto{white-space:pre-line; font-size:13px; color:var(--ink-soft); margin:0;}
 
   /* --- Listado RDI/EDI (Bandeja / Pendientes / Historial) --- */
-  .rdi-toolbar{display:flex; justify-content:flex-end; margin-bottom:10px;}
+  .rdi-toolbar{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;}
+  .rdi-search{flex:1; padding:8px 12px; border:1px solid var(--line); border-radius:8px; font-family:var(--font-display); font-size:13.5px; background:var(--white);}
+  .rdi-search:focus{outline:none; border-color:var(--teal);}
   .rdi-refresh{background:none; border:1px solid var(--line); border-radius:8px; padding:6px 12px; font-family:var(--font-display); font-size:12.5px; color:var(--ink-soft); cursor:pointer;}
   .rdi-refresh:hover{border-color:var(--teal); color:var(--teal);}
   .rdi-list{display:flex; flex-direction:column; gap:10px;}
@@ -281,7 +283,10 @@
       </div>
 
       <div class="view active" id="view-bandeja">
-        <div class="rdi-toolbar"><button class="rdi-refresh" onclick="cargarListadosRDIEDI_(true)">↻ Actualizar</button></div>
+        <div class="rdi-toolbar">
+          <input type="text" class="rdi-search" id="busqueda-bandeja" placeholder="Buscar por código, proyecto o número..." />
+          <button class="rdi-refresh" onclick="cargarListadosRDIEDI_(true)">↻ Actualizar</button>
+        </div>
         <div class="empty-state" id="empty-bandeja">
           <strong>Aún no hay RDI ni EDI creados</strong>
           <p>Usa el botón "+" para levantar un nuevo requerimiento o entrega de información.</p>
@@ -294,7 +299,10 @@
       </div>
 
       <div class="view" id="view-pendientes">
-        <div class="rdi-toolbar"><button class="rdi-refresh" onclick="cargarListadosRDIEDI_(true)">↻ Actualizar</button></div>
+        <div class="rdi-toolbar">
+          <input type="text" class="rdi-search" id="busqueda-pendientes" placeholder="Buscar por código, proyecto o número..." />
+          <button class="rdi-refresh" onclick="cargarListadosRDIEDI_(true)">↻ Actualizar</button>
+        </div>
         <div class="empty-state" id="empty-pendientes">
           <strong>Sin RDI/EDI pendientes de firma</strong>
           <p>Aquí aparecerán los documentos enviados que esperan la firma del receptor.</p>
@@ -303,7 +311,10 @@
       </div>
 
       <div class="view" id="view-historial">
-        <div class="rdi-toolbar"><button class="rdi-refresh" onclick="cargarListadosRDIEDI_(true)">↻ Actualizar</button></div>
+        <div class="rdi-toolbar">
+          <input type="text" class="rdi-search" id="busqueda-historial" placeholder="Buscar por código, proyecto o número..." />
+          <button class="rdi-refresh" onclick="cargarListadosRDIEDI_(true)">↻ Actualizar</button>
+        </div>
         <div class="empty-state" id="empty-historial">
           <strong>Historial vacío</strong>
           <p>Los RDI/EDI cerrados (firmados por ambas partes) quedarán listados aquí.</p>
@@ -1002,10 +1013,35 @@
     const pendientes = todos.filter((r) => r.tieneToken && !r.firmadoPorReceptor);
     const historial = todos.filter((r) => r.firmadoPorReceptor);
 
-    renderListaEnVista_('bandeja', todos);
-    renderListaEnVista_('pendientes', pendientes);
-    renderListaEnVista_('historial', historial);
+    renderListaEnVista_('bandeja', filtrarRegistros_(todos, terminoBusqueda_('bandeja')));
+    renderListaEnVista_('pendientes', filtrarRegistros_(pendientes, terminoBusqueda_('pendientes')));
+    renderListaEnVista_('historial', filtrarRegistros_(historial, terminoBusqueda_('historial')));
   }
+
+  // Lee lo que el usuario haya escrito en el buscador de esa pestaña (si existe).
+  function terminoBusqueda_(vista) {
+    const input = document.getElementById('busqueda-' + vista);
+    return input ? input.value.trim().toLowerCase() : '';
+  }
+
+  // Filtro instantáneo en memoria (sin volver a golpear el backend) por
+  // código de proyecto, tema o número — así se puede escribir letra a letra
+  // sin esperar respuesta de red.
+  function filtrarRegistros_(lista, termino) {
+    if (!termino) return lista;
+    return lista.filter((r) => {
+      const campos = [r.Codigo_Proyecto, r.Tema, r.Numero, r.Emisor_Nombre, r.Receptor_Nombre]
+        .map((v) => String(v || '').toLowerCase());
+      return campos.some((c) => c.includes(termino));
+    });
+  }
+
+  // Conecta los 3 buscadores: cada letra escrita vuelve a filtrar y renderizar
+  // esa misma pestaña, sin tocar las otras dos.
+  ['bandeja', 'pendientes', 'historial'].forEach((vista) => {
+    const input = document.getElementById('busqueda-' + vista);
+    if (input) input.addEventListener('input', renderTodosLosListados_);
+  });
 
   function renderListaEnVista_(vista, registros) {
     const cont = document.getElementById('lista-' + vista);
@@ -1014,11 +1050,35 @@
 
     if (registros.length === 0) {
       cont.innerHTML = '';
+      const termino = terminoBusqueda_(vista);
+      if (termino) {
+        // Búsqueda sin resultados: se usa el mismo recuadro pero con texto
+        // distinto, para no confundirlo con "no hay registros creados".
+        empty.querySelector('strong').textContent = 'Sin resultados';
+        empty.querySelector('p').textContent = 'No se encontró ningún RDI/EDI que coincida con "' + termino + '".';
+      } else {
+        restaurarTextoVacio_(vista);
+      }
       empty.style.display = 'block';
       return;
     }
     empty.style.display = 'none';
     cont.innerHTML = registros.map(tarjetaRegistroHTML_).join('');
+  }
+
+  // Textos originales de cada recuadro "vacío", para restaurarlos cuando se
+  // borra la búsqueda y ya no hay término que filtrar.
+  const TEXTOS_VACIOS_ORIGINALES_ = {
+    bandeja: { titulo: 'Aún no hay RDI ni EDI creados', texto: 'Usa el botón "+" para levantar un nuevo requerimiento o entrega de información.' },
+    pendientes: { titulo: 'Sin RDI/EDI pendientes de firma', texto: 'Aquí aparecerán los documentos enviados que esperan la firma del receptor.' },
+    historial: { titulo: 'Historial vacío', texto: 'Los RDI/EDI cerrados (firmados por ambas partes) quedarán listados aquí.' }
+  };
+  function restaurarTextoVacio_(vista) {
+    const empty = document.getElementById('empty-' + vista);
+    const original = TEXTOS_VACIOS_ORIGINALES_[vista];
+    if (!empty || !original) return;
+    empty.querySelector('strong').textContent = original.titulo;
+    empty.querySelector('p').textContent = original.texto;
   }
 
   function tarjetaRegistroHTML_(r) {
